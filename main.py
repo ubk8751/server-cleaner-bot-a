@@ -15,7 +15,7 @@ def load_config(path: str) -> dict:
 def main():
     """Entry point for bot-a."""
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="config.yaml")
+    p.add_argument("--config", default="/config/config.yaml")
     p.add_argument("--mode", choices=["retention", "pressure"], required=True)
     args = p.parse_args()
 
