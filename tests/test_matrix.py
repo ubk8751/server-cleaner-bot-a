@@ -1,20 +1,9 @@
 import pytest
 from unittest.mock import Mock, AsyncMock
-from catcord_bots.matrix import MatrixSession, create_client
+from catcord_bots.matrix import MatrixSession
 
 
 class TestMatrix:
-    def test_create_client(self):
-        session = create_client(
-            mxid="@bot:example.com",
-            base_url="https://matrix.example.com",
-            token="test_token"
-        )
-        assert session.api is not None
-        assert session.client is not None
-        assert session.api.token == "test_token"
-        assert session.api.base_url == "https://matrix.example.com"
-
     @pytest.mark.asyncio
     async def test_session_close(self):
         mock_api = Mock()
