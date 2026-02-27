@@ -144,20 +144,27 @@ class PersonalityRenderer:
 
     def _metrics_line(self, summary_payload: Dict[str, Any]) -> str:
         """Build deterministic metrics line from payload."""
-        disk = summary_payload.get("disk") or {}
+        mode = (summary_payload.get("mode") or "").lower()
         actions = summary_payload.get("actions") or {}
+        deleted = actions.get("deleted_count")
+        freed = actions.get("freed_gb")
+
+        if mode == "retention":
+            by_type = actions.get("deleted_by_type") or {}
+            imgs = by_type.get("images", 0)
+            non = by_type.get("non_images", 0)
+            return f"Retention: deleted={deleted} (images={imgs}, non_images={non}), freed_gb={freed}."
+
+        disk = summary_payload.get("disk") or {}
         pb = disk.get("percent_before")
         pt = disk.get("pressure_threshold")
-        fg = actions.get("freed_gb")
-        dc = actions.get("deleted_count")
 
-        if pb is None or pt is None or fg is None or dc is None:
+        if pb is None or pt is None or freed is None or deleted is None:
             return "Disk usage: unknown (threshold unknown). No deletions. Freed: 0.0 GB."
 
-        if int(dc) == 0:
-            return f"Disk usage: {pb}% (threshold {pt}%). No deletions. Freed: {fg} GB."
-        else:
-            return f"Disk usage: {pb}% (threshold {pt}%). Deleted: {dc}. Freed: {fg} GB."
+        if int(deleted) == 0:
+            return f"Disk usage: {pb}% (threshold {pt}%). No deletions. Freed: {freed} GB."
+        return f"Disk usage: {pb}% (threshold {pt}%). Deleted: {deleted}. Freed: {freed} GB."
 
     def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> tuple[bool, str]:
         """Deprecated - kept for compatibility."""

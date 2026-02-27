@@ -9,6 +9,7 @@ from mautrix.types import EventType, RoomID, EventID, MessageEvent, PaginationDi
 from catcord_bots.matrix import MatrixSession, send_text
 from catcord_bots.invites import join_all_invites
 from catcord_bots.personality import PersonalityRenderer
+from catcord_bots.state import payload_fingerprint, should_send
 
 
 def get_disk_usage_ratio(path: str) -> float:
@@ -153,6 +154,8 @@ async def run_retention(
     send_zero: bool,
     dry_run: bool,
     ai_cfg: Optional[PersonalityConfig] = None,
+    debug: bool = False,
+    force_notify: bool = False,
 ) -> None:
     start_time = datetime.now()
     cutoff_img = int((datetime.now() - timedelta(days=policy.image_days)).timestamp() * 1000)
@@ -221,6 +224,12 @@ async def run_retention(
             },
         }
         
+        state_path = "/state/retention_last.fp"
+        fp = payload_fingerprint(summary_payload)
+        if not should_send(state_path, fp, debug, force_notify):
+            print(f"Dedupe: skipping send (fp={fp[:12]}...)")
+            return
+        
         prefix = "[DRY-RUN] " if dry_run else ""
         freed_gb = freed / 1024 / 1024 / 1024
         fallback = (
@@ -274,6 +283,8 @@ async def run_pressure(
     send_zero: bool,
     dry_run: bool,
     ai_cfg: Optional[PersonalityConfig] = None,
+    debug: bool = False,
+    force_notify: bool = False,
 ) -> None:
     start_time = datetime.now()
     used = get_disk_usage_ratio(media_root)
@@ -306,6 +317,13 @@ async def run_pressure(
                     "duration_seconds": int(duration),
                 },
             }
+            
+            state_path = "/state/pressure_last.fp"
+            fp = payload_fingerprint(summary_payload)
+            if not should_send(state_path, fp, debug, force_notify):
+                print(f"Dedupe: skipping send (fp={fp[:12]}...)")
+                return
+            
             prefix = "[DRY-RUN] " if dry_run else ""
             fallback = (
                 f"{prefix} Pressure cleanup: disk={disk_before:.1f}% "
@@ -418,6 +436,12 @@ async def run_pressure(
                 "duration_seconds": int(duration),
             },
         }
+        
+        state_path = "/state/pressure_last.fp"
+        fp = payload_fingerprint(summary_payload)
+        if not should_send(state_path, fp, debug, force_notify):
+            print(f"Dedupe: skipping send (fp={fp[:12]}...)")
+            return
         
         prefix = "[DRY-RUN] " if dry_run else ""
         freed_gb = freed / 1024 / 1024 / 1024

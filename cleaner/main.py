@@ -60,6 +60,8 @@ async def main_async(args):
                     send_zero=cfg.notifications.send_zero_deletion_summaries,
                     dry_run=args.dry_run,
                     ai_cfg=ai_cfg,
+                    debug=args.debug,
+                    force_notify=args.force_notify,
                 )
             else:
                 await run_pressure(
@@ -71,6 +73,8 @@ async def main_async(args):
                     send_zero=cfg.notifications.send_zero_deletion_summaries,
                     dry_run=args.dry_run,
                     ai_cfg=ai_cfg,
+                    debug=args.debug,
+                    force_notify=args.force_notify,
                 )
         finally:
             conn.close()
@@ -83,6 +87,8 @@ def main():
     p.add_argument("--config", default="/config/config.yaml")
     p.add_argument("--mode", choices=["retention", "pressure"], required=True)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--debug", action="store_true", help="Force send even if dedupe would skip")
+    p.add_argument("--force-notify", action="store_true", help="Force send even on no-action")
     args = p.parse_args()
     asyncio.run(main_async(args))
 
