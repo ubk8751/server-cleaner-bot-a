@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from mautrix.types import EventType, RoomID, EventID, MessageEvent, PaginationDirection
 from catcord_bots.matrix import MatrixSession, send_text
 from catcord_bots.invites import join_all_invites
-from catcord_bots.ai_summary import AISummaryRenderer
+from catcord_bots.personality import PersonalityRenderer
 
 
 def get_disk_usage_ratio(path: str) -> float:
@@ -125,7 +125,7 @@ class Policy:
 
 
 @dataclass
-class AISummaryConfig:
+class PersonalityConfig:
     enabled: bool = False
     characters_api_url: str = "http://192.168.1.59:8091"
     character_id: str = "irina"
@@ -148,7 +148,7 @@ async def run_retention(
     notifications_room: Optional[str],
     send_zero: bool,
     dry_run: bool,
-    ai_cfg: Optional[AISummaryConfig] = None,
+    ai_cfg: Optional[PersonalityConfig] = None,
 ) -> None:
     start_time = datetime.now()
     cutoff_img = int((datetime.now() - timedelta(days=policy.image_days)).timestamp() * 1000)
@@ -228,7 +228,7 @@ async def run_retention(
         message = fallback
         if ai_cfg and ai_cfg.enabled:
             try:
-                renderer = AISummaryRenderer(
+                renderer = PersonalityRenderer(
                     characters_api_url=ai_cfg.characters_api_url,
                     character_id=ai_cfg.character_id,
                     cathy_api_url=ai_cfg.cathy_api_url,
@@ -258,7 +258,7 @@ async def run_pressure(
     notifications_room: Optional[str],
     send_zero: bool,
     dry_run: bool,
-    ai_cfg: Optional[AISummaryConfig] = None,
+    ai_cfg: Optional[PersonalityConfig] = None,
 ) -> None:
     start_time = datetime.now()
     used = get_disk_usage_ratio(media_root)
@@ -351,7 +351,7 @@ async def run_pressure(
         message = fallback
         if ai_cfg and ai_cfg.enabled:
             try:
-                renderer = AISummaryRenderer(
+                renderer = PersonalityRenderer(
                     characters_api_url=ai_cfg.characters_api_url,
                     character_id=ai_cfg.character_id,
                     cathy_api_url=ai_cfg.cathy_api_url,

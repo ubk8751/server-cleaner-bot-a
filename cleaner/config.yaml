@@ -22,7 +22,7 @@ notifications:
 
 rooms_allowlist: []
 
-ai_summary:
+add_personality:
   enabled: true
   characters_api_url: "http://192.168.1.59:8091"
   character_id: "irina"

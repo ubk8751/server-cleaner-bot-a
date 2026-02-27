@@ -4,7 +4,7 @@ import os
 from catcord_bots.config import load_yaml, FrameworkConfig
 from catcord_bots.matrix import create_client, whoami
 from catcord_bots.invites import join_all_invites
-from cleaner import init_db, sync_uploads, Policy, run_retention, run_pressure, AISummaryConfig
+from cleaner import init_db, sync_uploads, Policy, run_retention, run_pressure, PersonalityConfig
 
 
 async def main_async(args):
@@ -31,8 +31,8 @@ async def main_async(args):
                 emergency=float(thr.get("emergency", 0.92)),
             )
             
-            ai_raw = raw.get("ai_summary") or {}
-            ai_cfg = AISummaryConfig(
+            ai_raw = raw.get("add_personality") or {}
+            ai_cfg = PersonalityConfig(
                 enabled=bool(ai_raw.get("enabled", False)),
                 characters_api_url=str(ai_raw.get("characters_api_url", "http://192.168.1.59:8091")),
                 character_id=str(ai_raw.get("character_id", "irina")),

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 
-class AISummaryRenderer:
+class PersonalityRenderer:
     def __init__(
         self,
         characters_api_url: str,
