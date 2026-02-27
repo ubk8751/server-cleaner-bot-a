@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import time
 from typing import Any, Dict, Optional
@@ -91,7 +92,7 @@ class PersonalityRenderer:
         payload_str = json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)
         return (
             "You will be given a JSON payload with facts.\n"
-            "Write a short ops update.\n\n"
+            "Write a short ops update in Irina's voice.\n\n"
             "STRICT RULES:\n"
             "- Only use facts present in the JSON.\n"
             "- Do NOT invent deletions, rooms, users, causes, or numbers.\n"
@@ -121,8 +122,8 @@ class PersonalityRenderer:
             if self.cathy_api_key:
                 headers["Authorization"] = f"Bearer {self.cathy_api_key}"
 
-            for attempt in range(2):
-                async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                for attempt in range(2):
                     if self.cathy_api_mode.lower() == "ollama":
                         body = {
                             "model": self.cathy_api_model,
@@ -143,6 +144,14 @@ class PersonalityRenderer:
                         r.raise_for_status()
                         data = r.json()
                         text = (data.get("message") or {}).get("content", "").strip()
+                        if not text:
+                            done = data.get("done_reason") if isinstance(data, dict) else None
+                            raw = ""
+                            try:
+                                raw = r.text.replace("\n", " ")[:200]
+                            except Exception:
+                                pass
+                            print(f"PersonalityRenderer: empty ollama content (attempt={attempt}) done={done} raw='{raw}'")
                     else:
                         body = {
                             "model": self.cathy_api_model,
@@ -170,6 +179,7 @@ class PersonalityRenderer:
                         )
                     
                     if not text and attempt == 0:
+                        await asyncio.sleep(0.3)
                         continue
                     
                     if text:
