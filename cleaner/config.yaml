@@ -30,12 +30,12 @@ add_personality:
   character_id: "irina"
   cathy_api_url: "http://192.168.1.57:8100"
   cathy_api_key: null
-  timeout_seconds: 20
-  connect_timeout_seconds: 2
+  timeout_seconds: 60
+  connect_timeout_seconds: 3
   max_tokens: 180
   temperature: 0.2
   top_p: 0.9
-  min_seconds_between_calls: 30
+  min_seconds_between_calls: 0
   cathy_api_mode: "ollama"
   cathy_api_model: "phi3.5:latest"
   fallback_system_prompt: |

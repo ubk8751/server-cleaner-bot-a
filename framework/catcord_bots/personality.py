@@ -17,12 +17,12 @@ class PersonalityRenderer:
         cathy_api_key: Optional[str] = None,
         characters_api_key: Optional[str] = None,
         characters_api_key_header: str = "X-API-Key",
-        timeout_seconds: float = 15,
-        connect_timeout_seconds: float = 2,
+        timeout_seconds: float = 60,
+        connect_timeout_seconds: float = 3,
         max_tokens: int = 180,
         temperature: float = 0.2,
         top_p: float = 0.9,
-        min_seconds_between_calls: int = 30,
+        min_seconds_between_calls: int = 0,
         cathy_api_mode: str = "ollama",
         cathy_api_model: str = "phi3.5:latest",
     ):
@@ -122,7 +122,12 @@ class PersonalityRenderer:
         
         # Must correctly indicate no deletions when count is 0
         if deleted_count == 0:
-            no_deletion_phrases = ["no action", "no deletions", "0 deletions", "deleted 0", "deleted_count=0", "deleted_count: 0"]
+            no_deletion_phrases = [
+                "no action", "no deletions", "0 deletions", "deleted 0",
+                "deleted_count=0", "deleted_count: 0",
+                "no files were deleted",
+                "nothing was deleted",
+            ]
             if not any(p in tlow for p in no_deletion_phrases):
                 return False, "missing 'no deletions' statement when deleted_count=0"
         
@@ -163,8 +168,10 @@ class PersonalityRenderer:
             user_prompt = self._build_user_prompt(summary_payload)
 
             timeout = httpx.Timeout(
-                timeout=self.timeout_seconds,
                 connect=self.connect_timeout_seconds,
+                read=self.timeout_seconds,
+                write=self.timeout_seconds,
+                pool=self.timeout_seconds,
             )
 
             headers = {"Content-Type": "application/json"}
@@ -179,6 +186,7 @@ class PersonalityRenderer:
 
             async with httpx.AsyncClient(timeout=timeout) as client:
                 for attempt in range(2):
+                    text = ""
                     messages = list(base_messages)
                     
                     if attempt == 1 and last_reject_reason:
@@ -191,7 +199,8 @@ class PersonalityRenderer:
                                 "Rewrite using ONLY facts from the JSON. Plain text.\n"
                                 "Use this exact structure (fill in numbers):\n"
                                 "Disk usage: <percent_before>% (threshold <pressure_threshold>%). "
-                                "No deletions. Freed: <freed_gb> GB."
+                                "No deletions. Freed: <freed_gb> GB.\n"
+                                "Keep it to ONE short sentence."
                             )
                         })
                     
@@ -202,26 +211,33 @@ class PersonalityRenderer:
                             "messages": messages,
                             "options": {
                                 "temperature": self.temperature,
-                                "num_predict": 120,
-                                "num_ctx": 2048,
+                                "num_predict": 60,
+                                "num_ctx": 1024,
                             },
                         }
-                        r = await client.post(
-                            f"{self.cathy_api_url.rstrip('/')}/api/chat",
-                            headers=headers,
-                            json=body,
-                        )
-                        r.raise_for_status()
-                        data = r.json()
-                        text = (data.get("message") or {}).get("content", "").strip()
-                        if not text:
-                            done = data.get("done_reason") if isinstance(data, dict) else None
-                            raw = ""
-                            try:
-                                raw = r.text.replace("\n", " ")[:200]
-                            except Exception:
-                                pass
-                            print(f"PersonalityRenderer: empty ollama content (attempt={attempt}) done={done} raw='{raw}'")
+                        try:
+                            r = await client.post(
+                                f"{self.cathy_api_url.rstrip('/')}/api/chat",
+                                headers=headers,
+                                json=body,
+                            )
+                            r.raise_for_status()
+                            data = r.json()
+                            text = (data.get("message") or {}).get("content", "").strip()
+                            if not text:
+                                done = data.get("done_reason") if isinstance(data, dict) else None
+                                raw = ""
+                                try:
+                                    raw = r.text.replace("\n", " ")[:200]
+                                except Exception:
+                                    pass
+                                print(f"PersonalityRenderer: empty ollama content (attempt={attempt}) done={done} raw='{raw}'")
+                        except httpx.TimeoutException:
+                            print(f"PersonalityRenderer: Timeout (attempt={attempt})")
+                            if attempt == 0:
+                                last_reject_reason = "timeout"
+                                continue
+                            return None
                     else:
                         body = {
                             "model": self.cathy_api_model,
@@ -260,6 +276,8 @@ class PersonalityRenderer:
                             last_reject_reason = reason
                             continue
                         return None
+
+                    print(f"PersonalityRenderer: accepted (attempt={attempt})")
                     return text
 
                 return None

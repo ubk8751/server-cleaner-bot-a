@@ -17,8 +17,8 @@ class TestFramework:
         assert renderer.fallback_system_prompt == "Test prompt"
         assert renderer.characters_api_key == "test_key"
         assert renderer.characters_api_key_header == "X-API-Key"
-        assert renderer.timeout_seconds == 15
-        assert renderer.min_seconds_between_calls == 30
+        assert renderer.timeout_seconds == 60
+        assert renderer.min_seconds_between_calls == 0
         assert renderer.cathy_api_mode == "ollama"
         assert renderer.cathy_api_model == "phi3.5:latest"
 
