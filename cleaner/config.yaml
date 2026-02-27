@@ -24,9 +24,11 @@ rooms_allowlist: []
 
 add_personality:
   enabled: true
-  characters_api_url: "http://192.168.1.59:8091"
+  characters_api_url: "http://192.168.1.59:8090"
+  characters_api_key: "kOKZyFeDlkc9VnF0oVO_nsi49y3p0FclhsBSJoVA-Kc"
+  characters_api_key_header: "X-API-Key"
   character_id: "irina"
-  cathy_api_url: "http://192.168.1.59:8100"
+  cathy_api_url: "http://192.168.1.57:8100"
   cathy_api_key: null
   timeout_seconds: 6
   connect_timeout_seconds: 2
@@ -34,6 +36,8 @@ add_personality:
   temperature: 0.2
   top_p: 0.9
   min_seconds_between_calls: 30
+  cathy_api_mode: "ollama"
+  cathy_api_model: "gemma2:2b"
   fallback_system_prompt: |
     You are Irina, the Catcord maintenance bot.
     Write short, calm, factual ops updates.
