@@ -18,7 +18,7 @@ notifications:
   log_room_id: "!7v8paEHyTUpr285UsmGo3mzS9Cjw4wQ-60e9kmKCSrI"
   send_deletion_summary: true
   send_nightly_status: true
-  send_zero_deletion_summaries: false
+  send_zero_deletion_summaries: true
 
 rooms_allowlist: []
 
@@ -37,7 +37,7 @@ add_personality:
   top_p: 0.9
   min_seconds_between_calls: 30
   cathy_api_mode: "ollama"
-  cathy_api_model: "gemma2:2b"
+  cathy_api_model: "phi3.5:latest"
   fallback_system_prompt: |
     You are Irina, the Catcord maintenance bot.
     Write short, calm, factual ops updates.

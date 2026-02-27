@@ -88,8 +88,8 @@ class PersonalityRenderer:
             self._cached_etag = r.headers.get("ETag")
             return prompt
 
-    def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> bool:
-        """Validate AI output contains required facts from JSON."""
+    def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> tuple[bool, str]:
+        """Validate AI output contains required facts from JSON. Returns (ok, reason)."""
         tlow = text.lower()
         
         disk = summary_payload.get("disk") or {}
@@ -100,32 +100,40 @@ class PersonalityRenderer:
         deleted_count = actions.get("deleted_count")
         freed_gb = actions.get("freed_gb")
         
+        # Check banned phrases first
+        banned_phrases = ["operational since", "uptime", "elapsed", "today", "yesterday", "since '", 'since "']
+        for phrase in banned_phrases:
+            if phrase in tlow:
+                return False, f"contains banned phrase '{phrase}'"
+        
         # Must include key numbers (allow rounding/formatting)
         if percent_before is not None:
             pb_str = str(percent_before).rstrip("0").rstrip(".")
             if pb_str not in text and f"{percent_before:.1f}" not in text:
-                return False
+                return False, f"missing required number: {percent_before}"
         
         if pressure_threshold is not None:
             pt_str = str(pressure_threshold).rstrip("0").rstrip(".")
             pt_pct = str(int(pressure_threshold)) if pressure_threshold == int(pressure_threshold) else str(pressure_threshold)
             if pt_str not in text and pt_pct not in text:
-                return False
+                return False, f"missing required threshold: {pressure_threshold}"
+            if "threshold" not in tlow:
+                return False, "missing word 'threshold' for pressure_threshold"
         
         # Must correctly indicate no deletions when count is 0
         if deleted_count == 0:
             no_deletion_phrases = ["no action", "no deletions", "0 deletions", "deleted 0", "deleted_count=0", "deleted_count: 0"]
             if not any(p in tlow for p in no_deletion_phrases):
-                return False
+                return False, "missing 'no deletions' statement when deleted_count=0"
         
         # Must include freed_gb when deletions occurred
         if deleted_count and deleted_count > 0:
             if freed_gb is not None:
                 fg_str = str(freed_gb).rstrip("0").rstrip(".")
                 if fg_str not in text and f"{freed_gb:.1f}" not in text and f"{freed_gb:.2f}" not in text:
-                    return False
+                    return False, f"missing required freed_gb: {freed_gb}"
         
-        return True
+        return True, ""
 
     def _build_user_prompt(self, summary_payload: Dict[str, Any]) -> str:
         payload_str = json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)
@@ -163,18 +171,39 @@ class PersonalityRenderer:
             if self.cathy_api_key:
                 headers["Authorization"] = f"Bearer {self.cathy_api_key}"
 
+            base_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            last_reject_reason = None
+
             async with httpx.AsyncClient(timeout=timeout) as client:
                 for attempt in range(2):
+                    messages = list(base_messages)
+                    
+                    if attempt == 1 and last_reject_reason:
+                        forbidden = ["today", "yesterday", "operational since", "operational", "uptime", "since", "elapsed"]
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"Your previous draft violated rules: {last_reject_reason}\n"
+                                f"Forbidden words/phrases: {', '.join(forbidden)}\n"
+                                "Rewrite using ONLY facts from the JSON. Plain text.\n"
+                                "Use this exact structure (fill in numbers):\n"
+                                "Disk usage: <percent_before>% (threshold <pressure_threshold>%). "
+                                "No deletions. Freed: <freed_gb> GB."
+                            )
+                        })
+                    
                     if self.cathy_api_mode.lower() == "ollama":
                         body = {
                             "model": self.cathy_api_model,
                             "stream": False,
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
+                            "messages": messages,
                             "options": {
                                 "temperature": self.temperature,
+                                "num_predict": 120,
+                                "num_ctx": 2048,
                             },
                         }
                         r = await client.post(
@@ -196,10 +225,7 @@ class PersonalityRenderer:
                     else:
                         body = {
                             "model": self.cathy_api_model,
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
+                            "messages": messages,
                             "temperature": self.temperature,
                             "top_p": self.top_p,
                             "max_tokens": self.max_tokens,
@@ -221,21 +247,22 @@ class PersonalityRenderer:
                     
                     if not text and attempt == 0:
                         await asyncio.sleep(0.3)
+                        last_reject_reason = "empty output"
                         continue
                     
-                    if text:
-                        if not self._validate_output(summary_payload, text):
-                            print(f"PersonalityRenderer: output failed validation: {text[:140]!r}")
-                            return None
-                        
-                        tlow = text.lower()
-                        banned_phrases = ["operational since", "uptime", "elapsed", "today", "yesterday", "since '", 'since "']
-                        if any(p in tlow for p in banned_phrases):
-                            print(f"PersonalityRenderer: rejected output (banned phrase): {text[:140]!r}")
-                            return None
-                        
-                        return text
-                    return None
+                    if not text:
+                        return None
+                    
+                    ok, reason = self._validate_output(summary_payload, text)
+                    if not ok:
+                        print(f"PersonalityRenderer: rejected (attempt={attempt}): {reason} - {text[:100]!r}")
+                        if attempt == 0:
+                            last_reject_reason = reason
+                            continue
+                        return None
+                    return text
+
+                return None
 
         except Exception as e:
             print(f"PersonalityRenderer exception: {e!r}")
