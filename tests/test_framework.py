@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
-from catcord_bots.ai_summary import AISummaryRenderer
+from catcord_bots.personality import PersonalityRenderer
 
 
 class TestFramework:
-    def test_ai_summary_renderer_init(self):
-        renderer = AISummaryRenderer(
+    def test_personality_renderer_init(self):
+        renderer = PersonalityRenderer(
             characters_api_url="http://test.com",
             character_id="test_char",
             cathy_api_url="http://cathy.com",
@@ -16,8 +16,8 @@ class TestFramework:
         assert renderer.timeout_seconds == 6
         assert renderer.min_seconds_between_calls == 30
 
-    def test_ai_summary_renderer_rate_limiting(self):
-        renderer = AISummaryRenderer(
+    def test_personality_renderer_rate_limiting(self):
+        renderer = PersonalityRenderer(
             characters_api_url="http://test.com",
             character_id="test",
             cathy_api_url="http://cathy.com",
@@ -25,11 +25,12 @@ class TestFramework:
             min_seconds_between_calls=60
         )
         assert not renderer._rate_limited()
-        renderer._last_call_ts = 999999999
+        import time
+        renderer._last_call_ts = time.time()
         assert renderer._rate_limited()
 
-    def test_ai_summary_user_prompt_structure(self):
-        renderer = AISummaryRenderer(
+    def test_personality_user_prompt_structure(self):
+        renderer = PersonalityRenderer(
             characters_api_url="http://test.com",
             character_id="test",
             cathy_api_url="http://cathy.com",

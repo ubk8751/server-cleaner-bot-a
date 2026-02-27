@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from cleaner.cleaner import (
     parse_mxc, find_media_files, get_disk_usage_ratio, 
-    Policy, AISummaryConfig, init_db, extract_mxc_and_info
+    Policy, PersonalityConfig, init_db, extract_mxc_and_info
 )
 
 
@@ -38,8 +38,8 @@ class TestCleanerBot:
         assert p.pressure == 0.85
         assert p.emergency == 0.92
 
-    def test_ai_summary_config_defaults(self):
-        cfg = AISummaryConfig()
+    def test_personality_config_defaults(self):
+        cfg = PersonalityConfig()
         assert cfg.enabled is False
         assert cfg.character_id == "irina"
         assert cfg.timeout_seconds == 6
