@@ -141,7 +141,7 @@ class PersonalityConfig:
     min_seconds_between_calls: int = 0
     fallback_system_prompt: str = "You are a maintenance bot. Write short, calm, factual ops updates."
     cathy_api_mode: str = "ollama"
-    cathy_api_model: str = "phi3.5:latest"
+    cathy_api_model: str = "gemma2:2b"
 
 
 async def run_retention(

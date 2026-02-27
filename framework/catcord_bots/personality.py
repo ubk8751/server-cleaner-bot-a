@@ -25,7 +25,7 @@ class PersonalityRenderer:
         top_p: float = 0.9,
         min_seconds_between_calls: int = 0,
         cathy_api_mode: str = "ollama",
-        cathy_api_model: str = "phi3.5:latest",
+        cathy_api_model: str = "gemma2:2b",
     ):
         self.characters_api_url = characters_api_url
         self.character_id = character_id
@@ -88,6 +88,25 @@ class PersonalityRenderer:
         self._cached_etag = r.headers.get("ETag")
         return prompt
 
+    def _clean_prefix(self, s: str) -> str:
+        s = s.strip()
+        s = s.strip('"').strip("'")
+        return s.strip()
+
+    def _pressure_state(self, payload: dict) -> str:
+        disk = payload.get("disk") or {}
+        actions = payload.get("actions") or {}
+        pb = disk.get("percent_before")
+        pt = disk.get("pressure_threshold")
+        dc = actions.get("deleted_count") or 0
+        if dc > 0:
+            return "active"
+        if pb is None or pt is None:
+            return "ok"
+        if pb < pt and (pt - pb) <= 5.0:
+            return "close"
+        return "ok"
+
     def _validate_prefix(self, text: str) -> tuple[bool, str]:
         """Validate AI prefix is safe and contains no numbers. Returns (ok, reason)."""
         t = text.strip()
@@ -145,22 +164,31 @@ class PersonalityRenderer:
         return True, ""
 
     def _build_user_prompt(self, summary_payload: Dict[str, Any]) -> str:
-        return (
-            "You are Irina, the Catcord maintenance bot.\n"
-            "You have reviewed the server logs and are reporting the conclusion.\n\n"
-            "Write ONE short sentence as a prefix (max 140 chars).\n"
-            "Style: calm, slightly stern, ops-focused.\n\n"
-            "STRICT RULES:\n"
-            "- Do NOT include any numbers, percentages, GB, thresholds, timestamps, room names, or IDs.\n"
-            "- Do NOT mention 'today', 'yesterday', 'since', 'uptime', or 'operational since'.\n"
-            "- Do NOT claim deletions happened.\n"
-            "- Do NOT add a second sentence.\n"
-            "- Do NOT add quotes or markdown.\n"
-            "- Do NOT reply with acknowledgements like 'Ok', 'Understood', or 'Please provide'.\n\n"
-            "Examples of acceptable prefixes:\n"
-            '- "Master, I reviewed the logs: below threshold; no cleanup required."\n'
-            '- "Logs reviewed: pressure is low; taking no action."\n'
-        )
+        state = self._pressure_state(summary_payload)
+        if state == "ok":
+            return (
+                "You are Irina. You reviewed the server logs.\n"
+                "Write ONE short sentence (max 110 chars).\n"
+                "Meaning must match: No issues; nothing removed.\n"
+                "No digits, no timestamps, no quotes, no emojis.\n"
+                "Do not add a second sentence.\n"
+            )
+        elif state == "close":
+            return (
+                "You are Irina. You reviewed the server logs.\n"
+                "Write ONE short sentence (max 110 chars).\n"
+                "Meaning must match: Getting close to the limit; monitoring closely; no action yet.\n"
+                "No digits, no timestamps, no quotes, no emojis.\n"
+                "Do not add a second sentence.\n"
+            )
+        else:
+            return (
+                "You are Irina. You reviewed the server logs.\n"
+                "Write ONE short sentence (max 110 chars).\n"
+                "Meaning must match: Cleanup was required and was performed.\n"
+                "No digits, no timestamps, no quotes, no emojis.\n"
+                "Do not add a second sentence.\n"
+            )
 
     async def render(self, summary_payload: Dict[str, Any]) -> Optional[str]:
         if self._rate_limited():
@@ -219,9 +247,10 @@ class PersonalityRenderer:
                                 "stream": False,
                                 "messages": messages,
                                 "options": {
-                                    "temperature": 0.0,
-                                    "num_predict": 48,
-                                    "num_ctx": 512,
+                                    "temperature": 0.2,
+                                    "num_predict": 32,
+                                    "num_ctx": 384,
+                                    "stop": ["\n"],
                                 },
                             }
                             t0 = time.time()
@@ -234,6 +263,7 @@ class PersonalityRenderer:
                             r.raise_for_status()
                             data = r.json()
                             prefix = (data.get("message") or {}).get("content", "").strip()
+                            prefix = self._clean_prefix(prefix)
                             if prefix and "\n" in prefix:
                                 prefix = prefix.split("\n", 1)[0].strip()
                             print(f"PersonalityRenderer: call took {elapsed:.2f}s, raw prefix (attempt={attempt}): {prefix!r}", flush=True)
@@ -259,6 +289,7 @@ class PersonalityRenderer:
                                 .get("content", "")
                                 .strip()
                             )
+                            prefix = self._clean_prefix(prefix)
                             if prefix and "\n" in prefix:
                                 prefix = prefix.split("\n", 1)[0].strip()
                             print(f"PersonalityRenderer: raw prefix (attempt={attempt}): {prefix!r}", flush=True)

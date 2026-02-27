@@ -20,7 +20,7 @@ class TestFramework:
         assert renderer.timeout_seconds == 60
         assert renderer.min_seconds_between_calls == 0
         assert renderer.cathy_api_mode == "ollama"
-        assert renderer.cathy_api_model == "phi3.5:latest"
+        assert renderer.cathy_api_model == "gemma2:2b"
 
     def test_personality_renderer_rate_limiting(self):
         renderer = PersonalityRenderer(
@@ -46,4 +46,4 @@ class TestFramework:
         prompt = renderer._build_user_prompt(payload)
         assert "You are Irina" in prompt
         assert "ONE short sentence" in prompt
-        assert "Do NOT include any numbers" in prompt
+        assert "No digits" in prompt

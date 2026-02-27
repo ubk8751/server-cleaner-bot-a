@@ -37,7 +37,7 @@ add_personality:
   top_p: 0.9
   min_seconds_between_calls: 0
   cathy_api_mode: "ollama"
-  cathy_api_model: "phi3.5:latest"
+  cathy_api_model: "gemma2:2b"
   fallback_system_prompt: |
     You are Irina, the Catcord maintenance bot.
     Write short, calm, factual ops updates.
