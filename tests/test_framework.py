@@ -42,9 +42,8 @@ class TestFramework:
             cathy_api_url="http://cathy.com",
             fallback_system_prompt="Test"
         )
-        payload = {"test": "data", "count": 5}
+        payload = {"disk": {}, "actions": {}}
         prompt = renderer._build_user_prompt(payload)
-        assert "JSON payload:" in prompt
-        assert "STRICT RULES:" in prompt
-        assert "Do NOT invent" in prompt
-        assert '"test": "data"' in prompt
+        assert "You are Irina" in prompt
+        assert "ONE short sentence" in prompt
+        assert "Do NOT include any numbers" in prompt

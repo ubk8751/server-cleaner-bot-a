@@ -53,7 +53,7 @@ class PersonalityRenderer:
         self._last_call_ts = now
         return False
 
-    async def _fetch_system_prompt(self) -> str:
+    async def _fetch_system_prompt(self, client: httpx.AsyncClient) -> str:
         base = self.characters_api_url.rstrip("/")
         url = f"{base}/characters/{self.character_id}?view=private"
 
@@ -63,105 +63,103 @@ class PersonalityRenderer:
         if self._cached_etag:
             headers["If-None-Match"] = self._cached_etag
 
-        timeout = httpx.Timeout(
-            connect=self.connect_timeout_seconds,
-            read=self.timeout_seconds,
-            write=self.timeout_seconds,
-            pool=self.timeout_seconds,
-        )
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            try:
-                r = await client.get(url, headers=headers)
-            except httpx.TimeoutException as e:
-                print(f"PersonalityRenderer: characters_api timeout: {e!r}")
-                return self.fallback_system_prompt.strip()
-            
-            if r.status_code == 304 and self._cached_prompt:
-                return self._cached_prompt
-            r.raise_for_status()
-
-            data = r.json()
-            prompt = (
-                data.get("system_prompt")
-                or data.get("prompt")
-                or data.get("background")
-                or ""
-            ).strip()
-
-            if not prompt:
-                return self.fallback_system_prompt.strip()
-
-            self._cached_prompt = prompt
-            self._cached_etag = r.headers.get("ETag")
-            return prompt
-
-    def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> tuple[bool, str]:
-        """Validate AI output contains required facts from JSON. Returns (ok, reason)."""
-        tlow = text.lower()
+        try:
+            r = await client.get(url, headers=headers)
+        except httpx.TimeoutException as e:
+            print(f"PersonalityRenderer: characters_api timeout: {e!r}")
+            return self.fallback_system_prompt.strip()
         
+        if r.status_code == 304 and self._cached_prompt:
+            return self._cached_prompt
+        r.raise_for_status()
+
+        data = r.json()
+        prompt = (
+            data.get("system_prompt")
+            or data.get("prompt")
+            or data.get("background")
+            or ""
+        ).strip()
+
+        if not prompt:
+            return self.fallback_system_prompt.strip()
+
+        self._cached_prompt = prompt
+        self._cached_etag = r.headers.get("ETag")
+        return prompt
+
+    def _validate_prefix(self, text: str) -> tuple[bool, str]:
+        """Validate AI prefix is safe and contains no numbers. Returns (ok, reason)."""
+        t = text.strip()
+        tlow = t.lower()
+
+        if not t:
+            return False, "empty"
+
+        if "\n" in t:
+            return False, "newline"
+
+        if len(t) > 180:
+            return False, "too long"
+
+        if re.search(r"[.!?].+[A-Z]", t):
+            return False, "likely multiple sentences"
+
+        bad_ack = ["ok", "understood", "please provide"]
+        if any(tlow.startswith(x) for x in bad_ack):
+            return False, "acknowledgement/assistant filler"
+
+        banned = ["today", "yesterday", "uptime", "operational since", "elapsed"]
+        for b in banned:
+            if re.search(rf"\b{re.escape(b)}\b", tlow):
+                return False, f"banned phrase '{b}'"
+
+        if re.search(r"\d", t):
+            return False, "contains digits"
+
+        bad_actions = ["deleted", "removed", "purged", "redacted", "cleared"]
+        if any(w in tlow for w in bad_actions):
+            return False, "claims deletion"
+
+        return True, ""
+
+    def _metrics_line(self, summary_payload: Dict[str, Any]) -> str:
+        """Build deterministic metrics line from payload."""
         disk = summary_payload.get("disk") or {}
         actions = summary_payload.get("actions") or {}
-        
-        percent_before = disk.get("percent_before")
-        pressure_threshold = disk.get("pressure_threshold")
-        deleted_count = actions.get("deleted_count")
-        freed_gb = actions.get("freed_gb")
-        
-        # Must match required format
-        pattern = r"^Disk usage: .*% \(threshold .*%\)\. No deletions\. Freed: .* GB\.$"
-        if not re.match(pattern, text.strip()):
-            return False, "does not match required output format"
-        
-        # Check banned phrases
-        banned_phrases = ["operational since", "uptime", "elapsed", "today", "yesterday", "since '", 'since "']
-        for phrase in banned_phrases:
-            if phrase in tlow:
-                return False, f"contains banned phrase '{phrase}'"
-        
-        # Must include key numbers (allow rounding/formatting)
-        if percent_before is not None:
-            pb_str = str(percent_before).rstrip("0").rstrip(".")
-            if pb_str not in text and f"{percent_before:.1f}" not in text:
-                return False, f"missing required number: {percent_before}"
-        
-        if pressure_threshold is not None:
-            pt_str = str(pressure_threshold).rstrip("0").rstrip(".")
-            pt_pct = str(int(pressure_threshold)) if pressure_threshold == int(pressure_threshold) else str(pressure_threshold)
-            if pt_str not in text and pt_pct not in text:
-                return False, f"missing required threshold: {pressure_threshold}"
-            if "threshold" not in tlow:
-                return False, "missing word 'threshold' for pressure_threshold"
-        
-        # Must include literal "no deletions" when count is 0
-        if deleted_count == 0:
-            if "no deletions" not in tlow:
-                return False, "missing 'No deletions' literal"
-        
-        # Require freed_gb number match whenever freed_gb is present in JSON
-        if freed_gb is not None:
-            fg_str = str(freed_gb).rstrip("0").rstrip(".")
-            if fg_str not in text and f"{freed_gb:.1f}" not in text and f"{freed_gb:.2f}" not in text:
-                return False, f"missing required freed_gb: {freed_gb}"
-        
+        pb = disk.get("percent_before")
+        pt = disk.get("pressure_threshold")
+        fg = actions.get("freed_gb")
+        dc = actions.get("deleted_count")
+
+        if pb is None or pt is None or fg is None or dc is None:
+            return "Disk usage: unknown (threshold unknown). No deletions. Freed: 0.0 GB."
+
+        if int(dc) == 0:
+            return f"Disk usage: {pb}% (threshold {pt}%). No deletions. Freed: {fg} GB."
+        else:
+            return f"Disk usage: {pb}% (threshold {pt}%). Deleted: {dc}. Freed: {fg} GB."
+
+    def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> tuple[bool, str]:
+        """Deprecated - kept for compatibility."""
         return True, ""
 
     def _build_user_prompt(self, summary_payload: Dict[str, Any]) -> str:
-        payload_str = json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)
         return (
-            "Return ONLY a JSON object with this schema:\n"
-            '{"text": "<ONE LINE MESSAGE>"}\n\n'
-            "The text value MUST be exactly one line and must follow this exact format:\n"
-            "Disk usage: <percent_before>% (threshold <pressure_threshold>%). No deletions. Freed: <freed_gb> GB.\n\n"
+            "You are Irina, the Catcord maintenance bot.\n"
+            "You have reviewed the server logs and are reporting the conclusion.\n\n"
+            "Write ONE short sentence as a prefix (max 140 chars).\n"
+            "Style: calm, slightly stern, ops-focused.\n\n"
             "STRICT RULES:\n"
-            "- Only use facts present in the JSON payload below.\n"
-            "- Do NOT invent deletions, rooms, users, causes, or numbers.\n"
-            "- Do NOT mention uptime, 'since', 'operational since', 'elapsed', or any timestamps.\n"
-            "- Do NOT use relative time words like 'today' or 'yesterday'.\n"
-            "- If actions.deleted_count is 0, you MUST say 'No deletions'.\n"
-            "- If actions.deleted_count > 0, you MUST include deleted_count and freed_gb.\n"
-            "- Include key numeric facts exactly as provided.\n\n"
-            f"JSON payload:\n{payload_str}\n"
+            "- Do NOT include any numbers, percentages, GB, thresholds, timestamps, room names, or IDs.\n"
+            "- Do NOT mention 'today', 'yesterday', 'since', 'uptime', or 'operational since'.\n"
+            "- Do NOT claim deletions happened.\n"
+            "- Do NOT add a second sentence.\n"
+            "- Do NOT add quotes or markdown.\n"
+            "- Do NOT reply with acknowledgements like 'Ok', 'Understood', or 'Please provide'.\n\n"
+            "Examples of acceptable prefixes:\n"
+            '- "Master, I reviewed the logs: below threshold; no cleanup required."\n'
+            '- "Logs reviewed: pressure is low; taking no action."\n'
         )
 
     async def render(self, summary_payload: Dict[str, Any]) -> Optional[str]:
@@ -169,7 +167,7 @@ class PersonalityRenderer:
             return None
 
         try:
-            system_prompt = await self._fetch_system_prompt()
+            system_prompt = await self._fetch_system_prompt(client)
             user_prompt = self._build_user_prompt(summary_payload)
 
             timeout = httpx.Timeout(
@@ -193,26 +191,26 @@ class PersonalityRenderer:
                 for attempt in range(2):
                     try:
                         text = ""
+                        prefix = ""
                         messages = list(base_messages)
                         
                         if attempt == 1 and last_reject_reason:
-                            disk = summary_payload.get("disk") or {}
-                            actions = summary_payload.get("actions") or {}
-                            forbidden = ["today", "yesterday", "operational since", "operational", "uptime", "since", "elapsed"]
                             messages.append({
                                 "role": "user",
                                 "content": (
-                                    f"Your previous draft violated rules: {last_reject_reason}\n"
-                                    f"Forbidden words/phrases: {', '.join(forbidden)}\n"
-                                    "Rewrite using ONLY facts from the JSON. Plain text.\n"
-                                    "Use this exact structure (fill in numbers):\n"
-                                    "Disk usage: <percent_before>% (threshold <pressure_threshold>%). "
-                                    "No deletions. Freed: <freed_gb> GB.\n"
-                                    f"Numbers to use exactly: percent_before={disk.get('percent_before')}, "
-                                    f"pressure_threshold={disk.get('pressure_threshold')}, "
-                                    f"freed_gb={actions.get('freed_gb')}, "
-                                    f"deleted_count={actions.get('deleted_count')}.\n"
-                                    "Keep it to ONE short sentence."
+                                    f"Your previous prefix violated a rule: {last_reject_reason}\n"
+                                    "Rewrite the prefix.\n\n"
+                                    "PREFIX RULES (must follow):\n"
+                                    "- ONE sentence only.\n"
+                                    "- No digits at all.\n"
+                                    "- No numbers, %, GB, thresholds, IDs, timestamps.\n"
+                                    "- Do not claim files were deleted.\n"
+                                    "- Do not mention cleanup operations.\n"
+                                    "- Do not use: today, yesterday, since, uptime, operational.\n"
+                                    "- Plain text only.\n\n"
+                                    "Good examples:\n"
+                                    "Master, I reviewed the logs: below threshold; no action required.\n"
+                                    "Logs reviewed: pressure is low; standing by.\n"
                                 )
                             })
                         
@@ -220,33 +218,26 @@ class PersonalityRenderer:
                             body = {
                                 "model": self.cathy_api_model,
                                 "stream": False,
-                                "format": "json",
                                 "messages": messages,
                                 "options": {
                                     "temperature": 0.0,
-                                    "num_predict": 80,
-                                    "num_ctx": 768,
+                                    "num_predict": 48,
+                                    "num_ctx": 512,
                                 },
                             }
+                            t0 = time.time()
                             r = await client.post(
                                 f"{self.cathy_api_url.rstrip('/')}/api/chat",
                                 headers=headers,
                                 json=body,
                             )
+                            elapsed = time.time() - t0
                             r.raise_for_status()
                             data = r.json()
-                            raw = (data.get("message") or {}).get("content", "").strip()
-                            if not raw:
-                                done = data.get("done_reason") if isinstance(data, dict) else None
-                                print(f"PersonalityRenderer: empty ollama content (attempt={attempt}) done={done}")
-                                text = ""
-                            else:
-                                try:
-                                    obj = json.loads(raw)
-                                    text = str(obj.get("text") or "").strip()
-                                except Exception as e:
-                                    print(f"PersonalityRenderer: non-json output (attempt={attempt}): {raw[:120]!r}")
-                                    text = ""
+                            prefix = (data.get("message") or {}).get("content", "").strip()
+                            if prefix and "\n" in prefix:
+                                prefix = prefix.split("\n", 1)[0].strip()
+                            print(f"PersonalityRenderer: call took {elapsed:.2f}s, raw prefix (attempt={attempt}): {prefix!r}", flush=True)
                         else:
                             body = {
                                 "model": self.cathy_api_model,
@@ -263,41 +254,57 @@ class PersonalityRenderer:
                             )
                             r.raise_for_status()
                             data = r.json()
-                            text = (
+                            prefix = (
                                 data.get("choices", [{}])[0]
                                 .get("message", {})
                                 .get("content", "")
                                 .strip()
                             )
+                            if prefix and "\n" in prefix:
+                                prefix = prefix.split("\n", 1)[0].strip()
+                            print(f"PersonalityRenderer: raw prefix (attempt={attempt}): {prefix!r}", flush=True)
                         
-                        if not text and attempt == 0:
+                        if not prefix and attempt == 0:
                             await asyncio.sleep(0.3)
                             last_reject_reason = "empty output"
                             continue
                         
-                        if not text:
-                            return None
+                        if not prefix:
+                            print(f"PersonalityRenderer: empty prefix (attempt={attempt})", flush=True)
+                            last_reject_reason = "empty output"
+                            continue
                         
-                        ok, reason = self._validate_output(summary_payload, text)
+                        ok, reason = self._validate_prefix(prefix)
                         if not ok:
-                            print(f"PersonalityRenderer: rejected (attempt={attempt}): {reason} - {text[:100]!r}")
+                            print(f"PersonalityRenderer: rejected prefix (attempt={attempt}) reason={reason} prefix={prefix[:200]!r}", flush=True)
                             if attempt == 0:
                                 last_reject_reason = reason
                                 continue
-                            return None
+                            last_reject_reason = reason
+                            continue
 
-                        print(f"PersonalityRenderer: accepted (attempt={attempt})")
-                        return text
+                        final = f"{prefix.strip()} {self._metrics_line(summary_payload)}".strip()
+                        print(f"PersonalityRenderer: accepted (attempt={attempt}) final={final!r}", flush=True)
+                        return final
                     
                     except httpx.TimeoutException as e:
-                        print(f"PersonalityRenderer: Timeout (attempt={attempt}): {e!r}")
+                        print(f"PersonalityRenderer: Timeout (attempt={attempt}): {e!r}", flush=True)
                         if attempt == 0:
                             last_reject_reason = "timeout"
                             continue
-                        return None
+                        last_reject_reason = "timeout"
+                        continue
+                    except httpx.HTTPStatusError as e:
+                        print(f"PersonalityRenderer: HTTP error (attempt={attempt}): status={e.response.status_code} body={e.response.text[:200]!r}", flush=True)
+                        if attempt == 0:
+                            last_reject_reason = "http_error"
+                            continue
+                        last_reject_reason = "http_error"
+                        continue
 
-                return None
+                print(f"PersonalityRenderer: exhausted retries -> metrics only", flush=True)
+                return self._metrics_line(summary_payload)
 
         except Exception as e:
-            print(f"PersonalityRenderer exception: {e!r}")
-            return None
+            print(f"PersonalityRenderer exception -> metrics only: {e!r}", flush=True)
+            return self._metrics_line(summary_payload)
