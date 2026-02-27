@@ -17,7 +17,7 @@ def get_disk_usage_ratio(path: str) -> float:
 
 def init_db(db_path: str) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.Connection(db_path)
+    conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS uploads (
             event_id TEXT PRIMARY KEY,
@@ -55,18 +55,44 @@ def find_media_files(media_root: str, mxc: str) -> List[Path]:
     return hits
 
 
+def extract_mxc_and_info(event) -> tuple[str | None, str, int]:
+    c = getattr(event, "content", None)
+    url = None
+    mimetype = ""
+    size = 0
+
+    if hasattr(c, "serialize"):
+        c = c.serialize()
+
+    if isinstance(c, dict):
+        url = c.get("url")
+        if not url and isinstance(c.get("file"), dict):
+            url = c["file"].get("url")
+
+        info = c.get("info") if isinstance(c.get("info"), dict) else {}
+        mimetype = info.get("mimetype", "") or ""
+        size = int(info.get("size") or 0)
+    else:
+        url = getattr(c, "url", None)
+        if not url and hasattr(c, "file"):
+            url = getattr(getattr(c, "file", None), "url", None)
+
+        info = getattr(c, "info", None)
+        mimetype = getattr(info, "mimetype", "") if info else ""
+        size = int(getattr(info, "size", 0) if info else 0)
+
+    return url, mimetype, size
+
+
 async def log_upload(conn: sqlite3.Connection, event: MessageEvent) -> None:
-    url = getattr(event.content, "url", None)
-    if not url and hasattr(event.content, "file"):
-        url = getattr(event.content.file, "url", None)
-    if not url:
+    url, mimetype, size = extract_mxc_and_info(event)
+    if not url or not isinstance(url, str) or not url.startswith("mxc://"):
         return
-    size = getattr(getattr(event.content, "info", None), "size", 0) or 0
-    mimetype = getattr(getattr(event.content, "info", None), "mimetype", "") or ""
+
     conn.execute("""
         INSERT OR IGNORE INTO uploads (event_id, room_id, sender, mxc_uri, mimetype, size, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (str(event.event_id), str(event.room_id), str(event.sender), str(url), str(mimetype), int(size), int(event.timestamp)))
+    """, (str(event.event_id), str(event.room_id), str(event.sender), url, mimetype, size, int(event.timestamp)))
     conn.commit()
 
 
@@ -78,7 +104,8 @@ async def sync_uploads(session: MatrixSession, conn: sqlite3.Connection, rooms_a
         try:
             resp = await session.client.get_messages(room_id, limit=200)
             for event in resp.chunk:
-                if event.type == EventType.ROOM_MESSAGE:
+                t = str(event.type)
+                if t in ("m.room.message", "m.sticker"):
                     await log_upload(conn, event)
         except Exception:
             continue
