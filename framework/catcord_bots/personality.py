@@ -94,7 +94,10 @@ class PersonalityRenderer:
             "Write a short ops update.\n\n"
             "STRICT RULES:\n"
             "- Only use facts present in the JSON.\n"
-            "- Do NOT invent data or add new metrics.\n"
+            "- Do NOT invent deletions, rooms, users, causes, or numbers.\n"
+            "- If actions.deleted_count is 0, you MUST say there were no deletions and you MUST NOT imply anything was deleted.\n"
+            "- If actions.deleted_count > 0, you MUST include deleted_count and freed_gb.\n"
+            "- If disk.percent_before < disk.pressure_threshold, say below threshold.\n"
             "- Keep it under ~700 characters.\n"
             "- Include key numeric facts exactly as provided.\n"
             "- Plain text only.\n\n"
@@ -118,55 +121,66 @@ class PersonalityRenderer:
             if self.cathy_api_key:
                 headers["Authorization"] = f"Bearer {self.cathy_api_key}"
 
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                if self.cathy_api_mode.lower() == "ollama":
-                    body = {
-                        "model": self.cathy_api_model,
-                        "stream": False,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "options": {
+            for attempt in range(2):
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    if self.cathy_api_mode.lower() == "ollama":
+                        body = {
+                            "model": self.cathy_api_model,
+                            "stream": False,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            "options": {
+                                "temperature": self.temperature,
+                            },
+                        }
+                        r = await client.post(
+                            f"{self.cathy_api_url.rstrip('/')}/api/chat",
+                            headers=headers,
+                            json=body,
+                        )
+                        r.raise_for_status()
+                        data = r.json()
+                        text = (data.get("message") or {}).get("content", "").strip()
+                    else:
+                        body = {
+                            "model": self.cathy_api_model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
                             "temperature": self.temperature,
-                        },
-                    }
-                    r = await client.post(
-                        f"{self.cathy_api_url.rstrip('/')}/api/chat",
-                        headers=headers,
-                        json=body,
-                    )
-                    r.raise_for_status()
-                    data = r.json()
-                    text = (data.get("message") or {}).get("content", "").strip()
-                else:
-                    body = {
-                        "model": self.cathy_api_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": self.temperature,
-                        "top_p": self.top_p,
-                        "max_tokens": self.max_tokens,
-                        "stream": False,
-                    }
-                    r = await client.post(
-                        f"{self.cathy_api_url.rstrip('/')}/v1/chat/completions",
-                        headers=headers,
-                        json=body,
-                    )
-                    r.raise_for_status()
-                    data = r.json()
-                    text = (
-                        data.get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                        .strip()
-                    )
-                if text:
-                    return text
-                return None
+                            "top_p": self.top_p,
+                            "max_tokens": self.max_tokens,
+                            "stream": False,
+                        }
+                        r = await client.post(
+                            f"{self.cathy_api_url.rstrip('/')}/v1/chat/completions",
+                            headers=headers,
+                            json=body,
+                        )
+                        r.raise_for_status()
+                        data = r.json()
+                        text = (
+                            data.get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                            .strip()
+                        )
+                    
+                    if not text and attempt == 0:
+                        continue
+                    
+                    if text:
+                        deleted_count = (summary_payload.get("actions") or {}).get("deleted_count", None)
+                        if deleted_count == 0:
+                            tlow = text.lower()
+                            bad_words = ["deleted", "removed", "purged", "redacted", "cleared"]
+                            if any(w in tlow for w in bad_words):
+                                return None
+                        return text
+                    return None
 
         except Exception:
             return None
