@@ -88,6 +88,45 @@ class PersonalityRenderer:
             self._cached_etag = r.headers.get("ETag")
             return prompt
 
+    def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> bool:
+        """Validate AI output contains required facts from JSON."""
+        tlow = text.lower()
+        
+        disk = summary_payload.get("disk") or {}
+        actions = summary_payload.get("actions") or {}
+        
+        percent_before = disk.get("percent_before")
+        pressure_threshold = disk.get("pressure_threshold")
+        deleted_count = actions.get("deleted_count")
+        freed_gb = actions.get("freed_gb")
+        
+        # Must include key numbers (allow rounding/formatting)
+        if percent_before is not None:
+            pb_str = str(percent_before).rstrip("0").rstrip(".")
+            if pb_str not in text and f"{percent_before:.1f}" not in text:
+                return False
+        
+        if pressure_threshold is not None:
+            pt_str = str(pressure_threshold).rstrip("0").rstrip(".")
+            pt_pct = str(int(pressure_threshold)) if pressure_threshold == int(pressure_threshold) else str(pressure_threshold)
+            if pt_str not in text and pt_pct not in text:
+                return False
+        
+        # Must correctly indicate no deletions when count is 0
+        if deleted_count == 0:
+            no_deletion_phrases = ["no action", "no deletions", "0 deletions", "deleted 0", "deleted_count=0", "deleted_count: 0"]
+            if not any(p in tlow for p in no_deletion_phrases):
+                return False
+        
+        # Must include freed_gb when deletions occurred
+        if deleted_count and deleted_count > 0:
+            if freed_gb is not None:
+                fg_str = str(freed_gb).rstrip("0").rstrip(".")
+                if fg_str not in text and f"{freed_gb:.1f}" not in text and f"{freed_gb:.2f}" not in text:
+                    return False
+        
+        return True
+
     def _build_user_prompt(self, summary_payload: Dict[str, Any]) -> str:
         payload_str = json.dumps(summary_payload, ensure_ascii=False, sort_keys=True)
         return (
@@ -183,27 +222,9 @@ class PersonalityRenderer:
                         continue
                     
                     if text:
-                        deleted_count = (summary_payload.get("actions") or {}).get("deleted_count", None)
-                        if deleted_count == 0:
-                            tlow = text.lower()
-                            
-                            zero_markers = [
-                                "no deletions",
-                                "0 deletions",
-                                "deleted_count=0",
-                                "deleted_count: 0",
-                                "deleted_count is 0",
-                                "deleted_count is zero",
-                                "deleted=0",
-                                "deleted: 0",
-                                "deleted 0",
-                            ]
-                            has_zero_marker = any(m in tlow for m in zero_markers)
-                            
-                            bad_words = ["removed", "purged", "redacted", "cleared", "deleted"]
-                            if any(w in tlow for w in bad_words) and not has_zero_marker:
-                                print(f"PersonalityRenderer: rejected output (deleted_count=0): {text[:140]!r}")
-                                return None
+                        if not self._validate_output(summary_payload, text):
+                            print(f"PersonalityRenderer: output failed validation: {text[:140]!r}")
+                            return None
                         return text
                     return None
 
