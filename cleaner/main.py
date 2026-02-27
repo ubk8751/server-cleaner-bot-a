@@ -35,6 +35,8 @@ async def main_async(args):
             ai_cfg = PersonalityConfig(
                 enabled=bool(ai_raw.get("enabled", False)),
                 characters_api_url=str(ai_raw.get("characters_api_url", "http://192.168.1.59:8091")),
+                characters_api_key=ai_raw.get("characters_api_key"),
+                characters_api_key_header=str(ai_raw.get("characters_api_key_header", "X-API-Key")),
                 character_id=str(ai_raw.get("character_id", "irina")),
                 cathy_api_url=str(ai_raw.get("cathy_api_url", "http://192.168.1.59:8100")),
                 cathy_api_key=ai_raw.get("cathy_api_key"),

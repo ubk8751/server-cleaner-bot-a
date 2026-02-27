@@ -128,6 +128,8 @@ class Policy:
 class PersonalityConfig:
     enabled: bool = False
     characters_api_url: str = "http://192.168.1.59:8091"
+    characters_api_key: Optional[str] = None
+    characters_api_key_header: str = "X-API-Key"
     character_id: str = "irina"
     cathy_api_url: str = "http://192.168.1.59:8100"
     cathy_api_key: Optional[str] = None
@@ -236,6 +238,8 @@ async def run_retention(
                     cathy_api_url=ai_cfg.cathy_api_url,
                     fallback_system_prompt=ai_cfg.fallback_system_prompt,
                     cathy_api_key=ai_cfg.cathy_api_key,
+                    characters_api_key=ai_cfg.characters_api_key,
+                    characters_api_key_header=ai_cfg.characters_api_key_header,
                     timeout_seconds=ai_cfg.timeout_seconds,
                     connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
                     max_tokens=ai_cfg.max_tokens,
@@ -248,8 +252,11 @@ async def run_retention(
                 rendered = await renderer.render(summary_payload)
                 if rendered:
                     message = prefix + rendered
+                    print("AI render: used")
+                else:
+                    print("AI render: empty -> fallback")
             except Exception as e:
-                print(f"AI render failed: {e}")
+                print(f"AI render failed -> fallback: {e}")
         
         try:
             await send_text(session, notifications_room, message)
@@ -313,6 +320,8 @@ async def run_pressure(
                         cathy_api_url=ai_cfg.cathy_api_url,
                         fallback_system_prompt=ai_cfg.fallback_system_prompt,
                         cathy_api_key=ai_cfg.cathy_api_key,
+                        characters_api_key=ai_cfg.characters_api_key,
+                        characters_api_key_header=ai_cfg.characters_api_key_header,
                         timeout_seconds=ai_cfg.timeout_seconds,
                         connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
                         max_tokens=ai_cfg.max_tokens,
@@ -325,8 +334,11 @@ async def run_pressure(
                     rendered = await renderer.render(summary_payload)
                     if rendered:
                         message = prefix + rendered
+                        print("AI render: used")
+                    else:
+                        print("AI render: empty -> fallback")
                 except Exception as e:
-                    print(f"AI render failed: {e}")
+                    print(f"AI render failed -> fallback: {e}")
             try:
                 await send_text(session, notifications_room, message)
                 print(f"Sent message to {notifications_room}")
@@ -425,6 +437,8 @@ async def run_pressure(
                     cathy_api_url=ai_cfg.cathy_api_url,
                     fallback_system_prompt=ai_cfg.fallback_system_prompt,
                     cathy_api_key=ai_cfg.cathy_api_key,
+                    characters_api_key=ai_cfg.characters_api_key,
+                    characters_api_key_header=ai_cfg.characters_api_key_header,
                     timeout_seconds=ai_cfg.timeout_seconds,
                     connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
                     max_tokens=ai_cfg.max_tokens,
@@ -437,8 +451,11 @@ async def run_pressure(
                 rendered = await renderer.render(summary_payload)
                 if rendered:
                     message = prefix + rendered
+                    print("AI render: used")
+                else:
+                    print("AI render: empty -> fallback")
             except Exception as e:
-                print(f"AI render failed: {e}")
+                print(f"AI render failed -> fallback: {e}")
         
         try:
             await send_text(session, notifications_room, message)

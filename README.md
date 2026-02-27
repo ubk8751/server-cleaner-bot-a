@@ -60,6 +60,28 @@ The personality renderer supports two API modes:
 
 Set `cathy_api_model` to your model name (e.g., `llama3`, `gemma2:2b`, `cathy`).
 
+### Characters API Authentication
+
+To fetch private character prompts, configure:
+
+- `characters_api_key` - API key for authentication
+- `characters_api_key_header` - Header name (default: `X-API-Key`)
+
+These are passed as HTTP headers when fetching from `/characters/{id}?view=private`.
+
+Example config:
+```yaml
+add_personality:
+  enabled: true
+  characters_api_url: "http://192.168.1.59:8090"
+  characters_api_key: "your_api_key_here"
+  characters_api_key_header: "X-API-Key"
+  character_id: "irina"
+  cathy_api_url: "http://192.168.1.57:8100"
+  cathy_api_mode: "ollama"
+  cathy_api_model: "gemma2:2b"
+```
+
 ## Tests
 
 ```bash

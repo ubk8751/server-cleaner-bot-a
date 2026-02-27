@@ -14,6 +14,8 @@ class PersonalityRenderer:
         cathy_api_url: str,
         fallback_system_prompt: str,
         cathy_api_key: Optional[str] = None,
+        characters_api_key: Optional[str] = None,
+        characters_api_key_header: str = "X-API-Key",
         timeout_seconds: float = 6,
         connect_timeout_seconds: float = 2,
         max_tokens: int = 180,
@@ -28,6 +30,8 @@ class PersonalityRenderer:
         self.cathy_api_url = cathy_api_url
         self.fallback_system_prompt = fallback_system_prompt
         self.cathy_api_key = cathy_api_key
+        self.characters_api_key = characters_api_key
+        self.characters_api_key_header = characters_api_key_header
         self.timeout_seconds = timeout_seconds
         self.connect_timeout_seconds = connect_timeout_seconds
         self.max_tokens = max_tokens
@@ -52,6 +56,8 @@ class PersonalityRenderer:
         url = f"{base}/characters/{self.character_id}?view=private"
 
         headers = {}
+        if self.characters_api_key:
+            headers[self.characters_api_key_header] = self.characters_api_key
         if self._cached_etag:
             headers["If-None-Match"] = self._cached_etag
 

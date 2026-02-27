@@ -9,10 +9,14 @@ class TestFramework:
             characters_api_url="http://test.com",
             character_id="test_char",
             cathy_api_url="http://cathy.com",
-            fallback_system_prompt="Test prompt"
+            fallback_system_prompt="Test prompt",
+            characters_api_key="test_key",
+            characters_api_key_header="X-API-Key"
         )
         assert renderer.character_id == "test_char"
         assert renderer.fallback_system_prompt == "Test prompt"
+        assert renderer.characters_api_key == "test_key"
+        assert renderer.characters_api_key_header == "X-API-Key"
         assert renderer.timeout_seconds == 6
         assert renderer.min_seconds_between_calls == 30
         assert renderer.cathy_api_mode == "ollama"
