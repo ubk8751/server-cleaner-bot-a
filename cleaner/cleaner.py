@@ -272,6 +272,66 @@ async def run_pressure(
     used = get_disk_usage_ratio(media_root)
     if used < policy.pressure:
         print(f"disk usage {used:.3f} < {policy.pressure:.3f}, no action")
+        if notifications_room and (send_zero or dry_run):
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            disk_before = used * 100
+            summary_payload = {
+                "run_id": f"{start_time.isoformat()}Z-pressure",
+                "mode": "pressure",
+                "server": "catcord",
+                "disk": {
+                    "mount": media_root,
+                    "percent_before": round(disk_before, 1),
+                    "percent_after": round(disk_before, 1),
+                    "pressure_threshold": policy.pressure * 100,
+                    "emergency_threshold": policy.emergency * 100,
+                },
+                "policy": {"prefer_large_non_images": True},
+                "actions": {
+                    "deleted_count": 0,
+                    "freed_gb": 0.0,
+                    "deleted_by_type": {"images": 0, "non_images": 0},
+                },
+                "timing": {
+                    "started_at": start_time.isoformat() + "Z",
+                    "ended_at": end_time.isoformat() + "Z",
+                    "duration_seconds": int(duration),
+                },
+            }
+            prefix = "[DRY-RUN] " if dry_run else ""
+            fallback = (
+                f"{prefix} Pressure cleanup: disk={disk_before:.1f}% "
+                f"< threshold={policy.pressure*100:.1f}%, no action"
+            )
+            message = fallback
+            if ai_cfg and ai_cfg.enabled:
+                try:
+                    renderer = PersonalityRenderer(
+                        characters_api_url=ai_cfg.characters_api_url,
+                        character_id=ai_cfg.character_id,
+                        cathy_api_url=ai_cfg.cathy_api_url,
+                        fallback_system_prompt=ai_cfg.fallback_system_prompt,
+                        cathy_api_key=ai_cfg.cathy_api_key,
+                        timeout_seconds=ai_cfg.timeout_seconds,
+                        connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
+                        max_tokens=ai_cfg.max_tokens,
+                        temperature=ai_cfg.temperature,
+                        top_p=ai_cfg.top_p,
+                        min_seconds_between_calls=ai_cfg.min_seconds_between_calls,
+                        cathy_api_mode=ai_cfg.cathy_api_mode,
+                        cathy_api_model=ai_cfg.cathy_api_model,
+                    )
+                    rendered = await renderer.render(summary_payload)
+                    if rendered:
+                        message = prefix + rendered
+                except Exception as e:
+                    print(f"AI render failed: {e}")
+            try:
+                await send_text(session, notifications_room, message)
+                print(f"Sent message to {notifications_room}")
+            except Exception as e:
+                print(f"Failed to send message: {e}")
         return
     cur = conn.execute("""
         SELECT event_id, room_id, mxc_uri, mimetype, size, timestamp
@@ -350,7 +410,7 @@ async def run_pressure(
         prefix = "[DRY-RUN] " if dry_run else ""
         freed_gb = freed / 1024 / 1024 / 1024
         fallback = (
-            f"{prefix}⚠️ Pressure cleanup: disk={disk_before:.1f}%→{disk_after:.1f}% "
+            f"{prefix} Pressure cleanup: disk={disk_before:.1f}%→{disk_after:.1f}% "
             f"(threshold={policy.pressure*100:.1f}%, emergency={policy.emergency*100:.1f}%), "
             f"deleted={deleted} (images={deleted_images}, non_images={deleted_non_images}), "
             f"freed_gb={freed_gb:.2f}"
