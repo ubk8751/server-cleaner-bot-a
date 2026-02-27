@@ -186,8 +186,23 @@ class PersonalityRenderer:
                         deleted_count = (summary_payload.get("actions") or {}).get("deleted_count", None)
                         if deleted_count == 0:
                             tlow = text.lower()
-                            bad_words = ["deleted", "removed", "purged", "redacted", "cleared"]
-                            if any(w in tlow for w in bad_words):
+                            
+                            zero_markers = [
+                                "no deletions",
+                                "0 deletions",
+                                "deleted_count=0",
+                                "deleted_count: 0",
+                                "deleted_count is 0",
+                                "deleted_count is zero",
+                                "deleted=0",
+                                "deleted: 0",
+                                "deleted 0",
+                            ]
+                            has_zero_marker = any(m in tlow for m in zero_markers)
+                            
+                            bad_words = ["removed", "purged", "redacted", "cleared", "deleted"]
+                            if any(w in tlow for w in bad_words) and not has_zero_marker:
+                                print(f"PersonalityRenderer: rejected output (deleted_count=0): {text[:140]!r}")
                                 return None
                         return text
                     return None
