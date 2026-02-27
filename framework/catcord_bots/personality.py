@@ -135,6 +135,8 @@ class PersonalityRenderer:
             "STRICT RULES:\n"
             "- Only use facts present in the JSON.\n"
             "- Do NOT invent deletions, rooms, users, causes, or numbers.\n"
+            "- Do NOT mention uptime, 'since', 'operational since', 'elapsed', or any timestamps unless they appear verbatim in JSON.\n"
+            "- Do NOT use relative time words like 'today' or 'yesterday'.\n"
             "- If actions.deleted_count is 0, you MUST say there were no deletions and you MUST NOT imply anything was deleted.\n"
             "- If actions.deleted_count > 0, you MUST include deleted_count and freed_gb.\n"
             "- If disk.percent_before < disk.pressure_threshold, say below threshold.\n"
@@ -225,6 +227,13 @@ class PersonalityRenderer:
                         if not self._validate_output(summary_payload, text):
                             print(f"PersonalityRenderer: output failed validation: {text[:140]!r}")
                             return None
+                        
+                        tlow = text.lower()
+                        banned_phrases = ["operational since", "uptime", "elapsed", "today", "yesterday", "since '", 'since "']
+                        if any(p in tlow for p in banned_phrases):
+                            print(f"PersonalityRenderer: rejected output (banned phrase): {text[:140]!r}")
+                            return None
+                        
                         return text
                     return None
 

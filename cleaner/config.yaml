@@ -30,7 +30,7 @@ add_personality:
   character_id: "irina"
   cathy_api_url: "http://192.168.1.57:8100"
   cathy_api_key: null
-  timeout_seconds: 6
+  timeout_seconds: 20
   connect_timeout_seconds: 2
   max_tokens: 180
   temperature: 0.2
