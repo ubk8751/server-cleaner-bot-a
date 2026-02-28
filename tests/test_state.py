@@ -13,8 +13,8 @@ class TestState:
         assert len(fp1) == 64
 
     def test_payload_fingerprint_different(self):
-        p1 = {"mode": "retention", "deleted": 5}
-        p2 = {"mode": "retention", "deleted": 6}
+        p1 = {"mode": "retention", "actions": {"deleted_count": 5}}
+        p2 = {"mode": "retention", "actions": {"deleted_count": 6}}
         assert payload_fingerprint(p1) != payload_fingerprint(p2)
 
     def test_should_send_first_time(self):

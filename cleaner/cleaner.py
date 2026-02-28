@@ -19,13 +19,7 @@ def get_disk_usage_ratio(path: str) -> float:
 
 
 def count_media_files(media_root: str) -> int:
-    """Count total files under media_root.
-    
-    :param media_root: Root media directory
-    :type media_root: str
-    :return: Total file count
-    :rtype: int
-    """
+    """Count total files under media_root."""
     count = 0
     for root, _, files in os.walk(media_root):
         count += len(files)
@@ -34,7 +28,7 @@ def count_media_files(media_root: str) -> int:
 
 def init_db(db_path: str) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.Connection(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS uploads (
             event_id TEXT PRIMARY KEY,
@@ -216,92 +210,98 @@ async def run_retention(
         except Exception as e:
             print(f"retention failed {event_id}: {e}")
     
-    should_notify = (deleted > 0) or send_zero or dry_run or print_effective_config
-    if notifications_room and should_notify:
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-        disk_percent = used * 100
-        
-        summary_payload = {
-            "run_id": f"{start_time.isoformat()}Z-retention",
-            "mode": "retention",
-            "server": "catcord",
-            "disk": {
-                "mount": media_root,
-                "percent_before": round(disk_percent, 1),
-                "percent_after": round(disk_percent, 1),
-                "pressure_threshold": policy.pressure * 100,
-                "emergency_threshold": policy.emergency * 100,
-            },
-            "policy": {
-                "retention_days_images": policy.image_days,
-                "retention_days_non_images": policy.non_image_days,
-            },
-            "candidates_count": candidates_count,
-            "total_files_count": total_files,
-            "actions": {
-                "deleted_count": deleted,
-                "freed_gb": round(freed / 1024 / 1024 / 1024, 2),
-                "deleted_by_type": {
-                    "images": deleted_images,
-                    "non_images": deleted_non_images,
-                },
-            },
-            "timing": {
-                "started_at": start_time.isoformat() + "Z",
-                "ended_at": end_time.isoformat() + "Z",
-                "duration_seconds": int(duration),
-            },
-        }
-        
-        state_path = "/state/retention_last.fp"
-        fp = payload_fingerprint(summary_payload)
-        if not should_send(state_path, fp, print_effective_config):
-            print(f"Deduped: fingerprint unchanged (fp={fp[:12]}...)")
-            return
-        
-        prefix = "[DRY-RUN] " if dry_run else ""
-        stats = format_retention_stats(summary_payload)
-        
-        ai_prefix = None
-        if ai_cfg and ai_cfg.enabled:
-            try:
-                renderer = PersonalityRenderer(
-                    prompt_composer_url=ai_cfg.prompt_composer_url,
-                    character_id=ai_cfg.character_id,
-                    cathy_api_url=ai_cfg.cathy_api_url,
-                    fallback_system_prompt=ai_cfg.fallback_system_prompt,
-                    cathy_api_key=ai_cfg.cathy_api_key,
-                    timeout_seconds=ai_cfg.timeout_seconds,
-                    connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
-                    max_tokens=ai_cfg.max_tokens,
-                    temperature=ai_cfg.temperature,
-                    top_p=ai_cfg.top_p,
-                    min_seconds_between_calls=ai_cfg.min_seconds_between_calls,
-                    cathy_api_mode=ai_cfg.cathy_api_mode,
-                    cathy_api_model=ai_cfg.cathy_api_model,
-                )
-                ai_prefix = await renderer.render(summary_payload)
-                if ai_prefix:
-                    ai_prefix = ai_prefix.strip().strip('"').strip("'").strip()
-                    print("AI render: used")
-                else:
-                    print("AI render: empty -> stats only")
-            except Exception as e:
-                print(f"AI render failed -> stats only: {e}")
-        
-        if ai_prefix:
-            message = f"{prefix}{ai_prefix}\n\n{stats}"
-        else:
-            message = f"{prefix}{stats}"
-        
-        try:
-            await send_text(session, notifications_room, message)
-            print(f"Sent message to {notifications_room}")
-        except Exception as e:
-            print(f"Failed to send message: {e}")
-    elif notifications_room and not should_notify:
+    if not notifications_room:
+        return
+    
+    action_happened = deleted > 0
+    force_notify = print_effective_config
+    
+    if not force_notify and not action_happened and not send_zero:
         print(f"Not sending: send_zero disabled and no action (deleted={deleted})")
+        return
+    
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    disk_percent = used * 100
+    
+    summary_payload = {
+        "run_id": f"{start_time.isoformat()}Z-retention",
+        "mode": "retention",
+        "server": "catcord",
+        "disk": {
+            "mount": media_root,
+            "percent_before": round(disk_percent, 1),
+            "percent_after": round(disk_percent, 1),
+            "pressure_threshold": policy.pressure * 100,
+            "emergency_threshold": policy.emergency * 100,
+        },
+        "policy": {
+            "retention_days_images": policy.image_days,
+            "retention_days_non_images": policy.non_image_days,
+        },
+        "candidates_count": candidates_count,
+        "total_files_count": total_files,
+        "actions": {
+            "deleted_count": deleted,
+            "freed_gb": round(freed / 1024 / 1024 / 1024, 2),
+            "deleted_by_type": {
+                "images": deleted_images,
+                "non_images": deleted_non_images,
+            },
+        },
+        "timing": {
+            "started_at": start_time.isoformat() + "Z",
+            "ended_at": end_time.isoformat() + "Z",
+            "duration_seconds": int(duration),
+        },
+    }
+    
+    state_path = "/state/retention_last.fp"
+    fp = payload_fingerprint(summary_payload)
+    if not should_send(state_path, fp, force_notify):
+        print(f"Not sending: deduped (unchanged)")
+        return
+    
+    prefix = "[DRY-RUN] " if dry_run else ""
+    stats = format_retention_stats(summary_payload)
+    
+    ai_prefix = None
+    if ai_cfg and ai_cfg.enabled:
+        try:
+            renderer = PersonalityRenderer(
+                prompt_composer_url=ai_cfg.prompt_composer_url,
+                character_id=ai_cfg.character_id,
+                cathy_api_url=ai_cfg.cathy_api_url,
+                fallback_system_prompt=ai_cfg.fallback_system_prompt,
+                cathy_api_key=ai_cfg.cathy_api_key,
+                timeout_seconds=ai_cfg.timeout_seconds,
+                connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
+                max_tokens=ai_cfg.max_tokens,
+                temperature=ai_cfg.temperature,
+                top_p=ai_cfg.top_p,
+                min_seconds_between_calls=ai_cfg.min_seconds_between_calls,
+                cathy_api_mode=ai_cfg.cathy_api_mode,
+                cathy_api_model=ai_cfg.cathy_api_model,
+            )
+            ai_prefix = await renderer.render(summary_payload)
+            if ai_prefix:
+                ai_prefix = ai_prefix.strip().strip('"').strip("'").strip()
+                print("AI render: used")
+            else:
+                print("AI render: empty -> stats only")
+        except Exception as e:
+            print(f"AI render failed -> stats only: {e}")
+    
+    if ai_prefix:
+        message = f"{prefix}{ai_prefix}\n\n{stats}"
+    else:
+        message = f"{prefix}{stats}"
+    
+    try:
+        await send_text(session, notifications_room, message)
+        print(f"Sent message to {notifications_room}")
+    except Exception as e:
+        print(f"Failed to send message: {e}")
 
 
 async def run_pressure(
@@ -317,86 +317,61 @@ async def run_pressure(
 ) -> None:
     start_time = datetime.now()
     used = get_disk_usage_ratio(media_root)
+    
     if used < policy.pressure:
         print(f"disk usage {used:.3f} < {policy.pressure:.3f}, no action")
-        should_notify = send_zero or dry_run or print_effective_config
-        if notifications_room and should_notify:
-            end_time = datetime.now()
-            duration = (end_time - start_time).total_seconds()
-            disk_before = used * 100
-            summary_payload = {
-                "run_id": f"{start_time.isoformat()}Z-pressure",
-                "mode": "pressure",
-                "server": "catcord",
-                "disk": {
-                    "mount": media_root,
-                    "percent_before": round(disk_before, 1),
-                    "percent_after": round(disk_before, 1),
-                    "pressure_threshold": policy.pressure * 100,
-                    "emergency_threshold": policy.emergency * 100,
-                },
-                "policy": {"prefer_large_non_images": True},
-                "actions": {
-                    "deleted_count": 0,
-                    "freed_gb": 0.0,
-                    "deleted_by_type": {"images": 0, "non_images": 0},
-                },
-                "timing": {
-                    "started_at": start_time.isoformat() + "Z",
-                    "ended_at": end_time.isoformat() + "Z",
-                    "duration_seconds": int(duration),
-                },
-            }
-            
-            state_path = "/state/pressure_last.fp"
-            fp = payload_fingerprint(summary_payload)
-            if not should_send(state_path, fp, print_effective_config):
-                print(f"Deduped: fingerprint unchanged (fp={fp[:12]}...)")
-                return
-            
-            prefix = "[DRY-RUN] " if dry_run else ""
-            stats = format_pressure_stats(summary_payload)
-            
-            ai_prefix = None
-            if ai_cfg and ai_cfg.enabled:
-                try:
-                    renderer = PersonalityRenderer(
-                        prompt_composer_url=ai_cfg.prompt_composer_url,
-                        character_id=ai_cfg.character_id,
-                        cathy_api_url=ai_cfg.cathy_api_url,
-                        fallback_system_prompt=ai_cfg.fallback_system_prompt,
-                        cathy_api_key=ai_cfg.cathy_api_key,
-                        timeout_seconds=ai_cfg.timeout_seconds,
-                        connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
-                        max_tokens=ai_cfg.max_tokens,
-                        temperature=ai_cfg.temperature,
-                        top_p=ai_cfg.top_p,
-                        min_seconds_between_calls=ai_cfg.min_seconds_between_calls,
-                        cathy_api_mode=ai_cfg.cathy_api_mode,
-                        cathy_api_model=ai_cfg.cathy_api_model,
-                    )
-                    ai_prefix = await renderer.render(summary_payload)
-                    if ai_prefix:
-                        ai_prefix = ai_prefix.strip().strip('"').strip("'").strip()
-                        print("AI render: used")
-                    else:
-                        print("AI render: empty -> fallback")
-                except Exception as e:
-                    print(f"AI render failed -> fallback: {e}")
-            
-            if ai_prefix:
-                message = f"{prefix}{ai_prefix} {stats}"
-            else:
-                fallback = f"Pressure cleanup: disk={disk_before:.1f}% < threshold={policy.pressure*100:.1f}%, no action"
-                message = f"{prefix}{fallback}"
-            
-            try:
-                await send_text(session, notifications_room, message)
-                print(f"Sent message to {notifications_room}")
-            except Exception as e:
-                print(f"Failed to send message: {e}")
-        elif notifications_room and not should_notify:
+        
+        if not notifications_room:
+            return
+        
+        force_notify = print_effective_config
+        if not force_notify and not send_zero:
             print(f"Not sending: send_zero disabled and no action")
+            return
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        disk_before = used * 100
+        
+        summary_payload = {
+            "run_id": f"{start_time.isoformat()}Z-pressure",
+            "mode": "pressure",
+            "server": "catcord",
+            "disk": {
+                "mount": media_root,
+                "percent_before": round(disk_before, 1),
+                "percent_after": round(disk_before, 1),
+                "pressure_threshold": policy.pressure * 100,
+                "emergency_threshold": policy.emergency * 100,
+            },
+            "policy": {"prefer_large_non_images": True},
+            "actions": {
+                "deleted_count": 0,
+                "freed_gb": 0.0,
+                "deleted_by_type": {"images": 0, "non_images": 0},
+            },
+            "timing": {
+                "started_at": start_time.isoformat() + "Z",
+                "ended_at": end_time.isoformat() + "Z",
+                "duration_seconds": int(duration),
+            },
+        }
+        
+        state_path = "/state/pressure_last.fp"
+        fp = payload_fingerprint(summary_payload)
+        if not should_send(state_path, fp, force_notify):
+            print(f"Not sending: deduped (unchanged)")
+            return
+        
+        prefix = "[DRY-RUN] " if dry_run else ""
+        fallback = f"Pressure cleanup: disk={disk_before:.1f}% < threshold={policy.pressure*100:.1f}%, no action"
+        message = f"{prefix}{fallback}"
+        
+        try:
+            await send_text(session, notifications_room, message)
+            print(f"Sent message to {notifications_room}")
+        except Exception as e:
+            print(f"Failed to send message: {e}")
         return
     
     cur = conn.execute("""
@@ -409,6 +384,7 @@ async def run_pressure(
     deleted_images = 0
     deleted_non_images = 0
     disk_before = used * 100
+    
     for event_id, room_id, mxc_uri, mimetype, size, ts in cur.fetchall():
         used = get_disk_usage_ratio(media_root)
         if used < policy.pressure:
@@ -439,90 +415,62 @@ async def run_pressure(
         except Exception as e:
             print(f"pressure failed {event_id}: {e}")
     
-    should_notify = (deleted > 0) or send_zero or dry_run or print_effective_config
-    if notifications_room and should_notify:
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-        disk_after = get_disk_usage_ratio(media_root) * 100
-        
-        summary_payload = {
-            "run_id": f"{start_time.isoformat()}Z-pressure",
-            "mode": "pressure",
-            "server": "catcord",
-            "disk": {
-                "mount": media_root,
-                "percent_before": round(disk_before, 1),
-                "percent_after": round(disk_after, 1),
-                "pressure_threshold": policy.pressure * 100,
-                "emergency_threshold": policy.emergency * 100,
-            },
-            "policy": {
-                "prefer_large_non_images": True,
-            },
-            "actions": {
-                "deleted_count": deleted,
-                "freed_gb": round(freed / 1024 / 1024 / 1024, 2),
-                "deleted_by_type": {
-                    "images": deleted_images,
-                    "non_images": deleted_non_images,
-                },
-            },
-            "timing": {
-                "started_at": start_time.isoformat() + "Z",
-                "ended_at": end_time.isoformat() + "Z",
-                "duration_seconds": int(duration),
-            },
-        }
-        
-        state_path = "/state/pressure_last.fp"
-        fp = payload_fingerprint(summary_payload)
-        if not should_send(state_path, fp, print_effective_config):
-            print(f"Deduped: fingerprint unchanged (fp={fp[:12]}...)")
-            return
-        
-        prefix = "[DRY-RUN] " if dry_run else ""
-        stats = format_pressure_stats(summary_payload)
-        
-        ai_prefix = None
-        if ai_cfg and ai_cfg.enabled:
-            try:
-                renderer = PersonalityRenderer(
-                    prompt_composer_url=ai_cfg.prompt_composer_url,
-                    character_id=ai_cfg.character_id,
-                    cathy_api_url=ai_cfg.cathy_api_url,
-                    fallback_system_prompt=ai_cfg.fallback_system_prompt,
-                    cathy_api_key=ai_cfg.cathy_api_key,
-                    timeout_seconds=ai_cfg.timeout_seconds,
-                    connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
-                    max_tokens=ai_cfg.max_tokens,
-                    temperature=ai_cfg.temperature,
-                    top_p=ai_cfg.top_p,
-                    min_seconds_between_calls=ai_cfg.min_seconds_between_calls,
-                    cathy_api_mode=ai_cfg.cathy_api_mode,
-                    cathy_api_model=ai_cfg.cathy_api_model,
-                )
-                ai_prefix = await renderer.render(summary_payload)
-                if ai_prefix:
-                    ai_prefix = ai_prefix.strip().strip('"').strip("'").strip()
-                    print("AI render: used")
-                else:
-                    print("AI render: empty -> fallback")
-            except Exception as e:
-                print(f"AI render failed -> fallback: {e}")
-        
-        if ai_prefix:
-            message = f"{prefix}{ai_prefix} {stats}"
-        else:
-            fallback = (
-                f"Pressure cleanup: disk={disk_before:.1f}%→{disk_after:.1f}% "
-                f"(threshold={policy.pressure*100:.1f}%), deleted={deleted}, freed_gb={freed / 1024 / 1024 / 1024:.2f}"
-            )
-            message = f"{prefix}{fallback}"
-        
-        try:
-            await send_text(session, notifications_room, message)
-            print(f"Sent message to {notifications_room}")
-        except Exception as e:
-            print(f"Failed to send message: {e}")
-    elif notifications_room and not should_notify:
+    if not notifications_room:
+        return
+    
+    action_happened = deleted > 0
+    force_notify = print_effective_config
+    
+    if not force_notify and not action_happened and not send_zero:
         print(f"Not sending: send_zero disabled and no action (deleted={deleted})")
+        return
+    
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    disk_after = get_disk_usage_ratio(media_root) * 100
+    
+    summary_payload = {
+        "run_id": f"{start_time.isoformat()}Z-pressure",
+        "mode": "pressure",
+        "server": "catcord",
+        "disk": {
+            "mount": media_root,
+            "percent_before": round(disk_before, 1),
+            "percent_after": round(disk_after, 1),
+            "pressure_threshold": policy.pressure * 100,
+            "emergency_threshold": policy.emergency * 100,
+        },
+        "policy": {"prefer_large_non_images": True},
+        "actions": {
+            "deleted_count": deleted,
+            "freed_gb": round(freed / 1024 / 1024 / 1024, 2),
+            "deleted_by_type": {
+                "images": deleted_images,
+                "non_images": deleted_non_images,
+            },
+        },
+        "timing": {
+            "started_at": start_time.isoformat() + "Z",
+            "ended_at": end_time.isoformat() + "Z",
+            "duration_seconds": int(duration),
+        },
+    }
+    
+    state_path = "/state/pressure_last.fp"
+    fp = payload_fingerprint(summary_payload)
+    if not should_send(state_path, fp, force_notify):
+        print(f"Not sending: deduped (unchanged)")
+        return
+    
+    prefix = "[DRY-RUN] " if dry_run else ""
+    fallback = (
+        f"Pressure cleanup: disk={disk_before:.1f}%→{disk_after:.1f}% "
+        f"(threshold={policy.pressure*100:.1f}%), deleted={deleted}, freed_gb={freed / 1024 / 1024 / 1024:.2f}"
+    )
+    message = f"{prefix}{fallback}"
+    
+    try:
+        await send_text(session, notifications_room, message)
+        print(f"Sent message to {notifications_room}")
+    except Exception as e:
+        print(f"Failed to send message: {e}")

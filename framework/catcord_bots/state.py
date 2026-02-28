@@ -5,9 +5,42 @@ import os
 from typing import Dict, Any
 
 
+def _normalize_payload_for_fingerprint(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract stable fields for fingerprinting, excluding volatile timing/IDs."""
+    mode = payload.get("mode", "unknown")
+    normalized = {
+        "mode": mode,
+        "server": payload.get("server", "unknown"),
+    }
+    
+    disk = payload.get("disk") or {}
+    normalized["disk"] = {
+        "percent_before": disk.get("percent_before"),
+        "percent_after": disk.get("percent_after"),
+        "pressure_threshold": disk.get("pressure_threshold"),
+        "emergency_threshold": disk.get("emergency_threshold"),
+    }
+    
+    actions = payload.get("actions") or {}
+    normalized["actions"] = {
+        "deleted_count": actions.get("deleted_count"),
+        "freed_gb": actions.get("freed_gb"),
+        "deleted_by_type": actions.get("deleted_by_type"),
+    }
+    
+    if mode == "retention":
+        policy = payload.get("policy") or {}
+        normalized["policy"] = policy
+        normalized["candidates_count"] = payload.get("candidates_count")
+        normalized["total_files_count"] = payload.get("total_files_count")
+    
+    return normalized
+
+
 def payload_fingerprint(payload: Dict[str, Any]) -> str:
-    """Generate stable hash from payload."""
-    s = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    """Generate stable hash from payload, excluding volatile fields."""
+    normalized = _normalize_payload_for_fingerprint(payload)
+    s = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
