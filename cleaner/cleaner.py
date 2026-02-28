@@ -237,6 +237,7 @@ async def run_retention(
             "pressure_threshold": policy.pressure * 100,
             "emergency_threshold": policy.emergency * 100,
         },
+        "storage_status": "tight" if used >= policy.pressure else "healthy",
         "policy": {
             "retention_days_images": policy.image_days,
             "retention_days_non_images": policy.non_image_days,

@@ -76,6 +76,15 @@ class PersonalityRenderer:
             print(f"PersonalityRenderer: composer error: {e!r}", flush=True)
             return None
 
+    def _normalize_prefix(self, raw: str) -> str:
+        """Normalize raw prefix."""
+        text = raw.strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        elif text.startswith("'") and text.endswith("'"):
+            text = text[1:-1]
+        return text.strip()
+
     async def _call_llm(self, client: httpx.AsyncClient, messages: list) -> Optional[str]:
         """Call LLM with messages and return prefix text."""
         headers = {"Content-Type": "application/json"}
@@ -89,7 +98,7 @@ class PersonalityRenderer:
                     "stream": False,
                     "messages": messages,
                     "options": {
-                        "temperature": 0.2,
+                        "temperature": 0.0,
                         "num_predict": 32,
                         "num_ctx": 384,
                         "stop": ["\n"],
@@ -126,10 +135,6 @@ class PersonalityRenderer:
                     .strip()
                 )
             
-            prefix = prefix.strip().strip('"').strip("'").strip()
-            if prefix and "\n" in prefix:
-                prefix = prefix.split("\n", 1)[0].strip()
-            
             return prefix if prefix else None
             
         except httpx.TimeoutException as e:
@@ -142,6 +147,18 @@ class PersonalityRenderer:
             print(f"PersonalityRenderer: LLM error: {e!r}", flush=True)
             return None
 
+    def _get_fallback_prefix(self, summary_payload: Dict[str, Any]) -> str:
+        """Get deterministic fallback prefix based on payload."""
+        actions = summary_payload.get("actions", {})
+        deleted_count = actions.get("deleted_count", 0)
+        storage_status = summary_payload.get("storage_status", "unknown")
+        
+        if deleted_count == 0:
+            if storage_status in ["tight", "warning"]:
+                return "Storage getting tight, Master."
+            return "Logs clear, Master."
+        return "Cleanup executed, Master."
+
     def _validate_prefix(self, text: str) -> tuple[bool, str]:
         """Validate AI prefix is safe and contains no numbers."""
         t = text.strip()
@@ -149,18 +166,25 @@ class PersonalityRenderer:
 
         if not t:
             return False, "empty"
-        if "\n" in t:
-            return False, "newline"
-        if len(t) > 180:
+        if len(t) > 140:
             return False, "too long"
-        if re.search(r"[.!?].+[A-Z]", t):
-            return False, "likely multiple sentences"
+        if "\n" in t:
+            return False, "contains newline"
+        if '"' in t or "'" in t:
+            return False, "contains quotes"
+        if re.search(r"[.!?].+[.!?]", t):
+            return False, "multiple sentences"
+
+        meta_phrases = ["matrix", "room", "multiple people", "responding", "system", "prompt", "rules", "as an ai", "i am a", "i'm a", "bot", "assistant"]
+        for phrase in meta_phrases:
+            if phrase in tlow:
+                return False, f"meta/self-description '{phrase}'"
 
         bad_ack = ["ok", "understood", "please provide"]
         if any(tlow.startswith(x) for x in bad_ack):
             return False, "acknowledgement/assistant filler"
 
-        banned = ["today", "yesterday", "uptime", "operational since", "elapsed"]
+        banned = ["today", "yesterday", "uptime", "since", "operational since", "elapsed"]
         for b in banned:
             if re.search(rf"\b{re.escape(b)}\b", tlow):
                 return False, f"banned phrase '{b}'"
@@ -201,20 +225,34 @@ class PersonalityRenderer:
                         return None
                     messages = [
                         {"role": "system", "content": system_text},
-                        {"role": "user", "content": "Provide status update."}
+                        {"role": "user", "content": (
+                            "Write ONE short prefix sentence (3-10 words) confirming you reviewed logs and stating the conclusion. "
+                            "Address me as 'Master'. "
+                            "No digits, no numbers, no timestamps, no percentages, no GB. "
+                            "Must NOT mention being a bot/AI, must NOT mention Matrix, room, system prompt, rules, multiple people, or responding. "
+                            "Must NOT ask questions. Must NOT include quotes. "
+                            "Examples: 'Logs clear, Master.' 'Storage getting tight, Master.' 'Cleanup executed, Master.' 'All systems nominal, Master.' 'Maintenance complete, Master.'"
+                        )}
                     ]
                 
                 for attempt in range(2):
-                    prefix = await self._call_llm(client, messages)
-                    if not prefix:
+                    print(f"PersonalityRenderer: input_messages={json.dumps(messages, indent=2)}", flush=True)
+                    raw_prefix = await self._call_llm(client, messages)
+                    if not raw_prefix:
                         print(f"PersonalityRenderer: empty LLM response (attempt={attempt})", flush=True)
                         if attempt == 0:
                             continue
                         return None
                     
-                    ok, reason = self._validate_prefix(prefix)
+                    print(f"PersonalityRenderer: raw_prefix={raw_prefix!r}", flush=True)
+                    normalized = self._normalize_prefix(raw_prefix)
+                    print(f"PersonalityRenderer: normalized={normalized!r}", flush=True)
+                    
+                    ok, reason = self._validate_prefix(normalized)
+                    print(f"PersonalityRenderer: validation={ok} reason={reason!r}", flush=True)
+                    
                     if not ok:
-                        print(f"PersonalityRenderer: rejected prefix (attempt={attempt}) reason={reason} prefix={prefix[:100]!r}", flush=True)
+                        print(f"PersonalityRenderer: rejected (attempt={attempt})", flush=True)
                         if attempt == 0:
                             messages.append({
                                 "role": "user",
@@ -224,12 +262,16 @@ class PersonalityRenderer:
                                 )
                             })
                             continue
-                        return None
+                        fallback = self._get_fallback_prefix(summary_payload)
+                        print(f"PersonalityRenderer: using fallback={fallback!r}", flush=True)
+                        return fallback
                     
-                    print(f"PersonalityRenderer: accepted prefix={prefix!r}", flush=True)
-                    return prefix
+                    print(f"PersonalityRenderer: accepted prefix={normalized!r}", flush=True)
+                    return normalized
                 
-                return None
+                fallback = self._get_fallback_prefix(summary_payload)
+                print(f"PersonalityRenderer: using fallback={fallback!r}", flush=True)
+                return fallback
 
         except Exception as e:
             print(f"PersonalityRenderer: render exception: {e!r}", flush=True)
