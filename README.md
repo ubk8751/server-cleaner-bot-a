@@ -81,29 +81,30 @@ See [SYSTEMD.md](SYSTEMD.md) for systemd service and timer configuration:
 
 ## AI Configuration
 
-The personality renderer supports two API modes:
+The personality renderer uses prompt-composer to build system prompts:
 
+- `prompt_composer_url` - URL of cathyAI-infra prompt-composer service
+- `character_id` - Character to use (e.g., `irina`)
 - `cathy_api_mode: "ollama"` - Uses Ollama `/api/chat` endpoint
 - `cathy_api_mode: "openai"` - Uses OpenAI-compatible `/v1/chat/completions` endpoint
 
 Set `cathy_api_model` to your model name (e.g., `llama3`, `gemma2:2b`, `cathy`).
 
-### Characters API Authentication
+### Prompt Composer
 
-To fetch private character prompts, configure:
+The bot calls prompt-composer `/v1/prompt/compose` with:
+- `task`: "pressure_status" or "retention_report"
+- `platform`: "matrix"
+- `character_id`: from config
+- `task_inputs`: structured payload with disk/actions/timing data
 
-- `characters_api_key` - API key for authentication
-- `characters_api_key_header` - Header name (default: `X-API-Key`)
-
-These are passed as HTTP headers when fetching from `/characters/{id}?view=private`.
+Prompt-composer fetches character data and builds appropriate prompts.
 
 Example config:
 ```yaml
 add_personality:
   enabled: true
-  characters_api_url: "http://192.168.1.59:8090"
-  characters_api_key: "your_api_key_here"
-  characters_api_key_header: "X-API-Key"
+  prompt_composer_url: "http://192.168.1.59:8110"
   character_id: "irina"
   cathy_api_url: "http://192.168.1.57:8100"
   cathy_api_mode: "ollama"

@@ -42,8 +42,8 @@ class TestCleanerBot:
         cfg = PersonalityConfig()
         assert cfg.enabled is False
         assert cfg.character_id == "irina"
-        assert cfg.characters_api_key is None
-        assert cfg.characters_api_key_header == "X-API-Key"
+        assert cfg.prompt_composer_url == "http://192.168.1.59:8110"
+        assert cfg.cathy_api_key is None
         assert cfg.timeout_seconds == 60
         assert cfg.max_tokens == 180
         assert cfg.temperature == 0.0
@@ -53,12 +53,10 @@ class TestCleanerBot:
     def test_personality_config_with_auth(self):
         cfg = PersonalityConfig(
             enabled=True,
-            characters_api_key="test_key_123",
-            characters_api_key_header="Authorization"
+            prompt_composer_url="http://test.com:8110",
         )
         assert cfg.enabled is True
-        assert cfg.characters_api_key == "test_key_123"
-        assert cfg.characters_api_key_header == "Authorization"
+        assert cfg.prompt_composer_url == "http://test.com:8110"
 
     def test_init_db_creates_table(self):
         with tempfile.TemporaryDirectory() as tmpdir:

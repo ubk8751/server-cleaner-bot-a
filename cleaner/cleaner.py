@@ -143,9 +143,7 @@ class Policy:
 @dataclass
 class PersonalityConfig:
     enabled: bool = False
-    characters_api_url: str = "http://192.168.1.59:8091"
-    characters_api_key: Optional[str] = None
-    characters_api_key_header: str = "X-API-Key"
+    prompt_composer_url: str = "http://192.168.1.59:8110"
     character_id: str = "irina"
     cathy_api_url: str = "http://192.168.1.59:8100"
     cathy_api_key: Optional[str] = None
@@ -269,13 +267,11 @@ async def run_retention(
         if ai_cfg and ai_cfg.enabled:
             try:
                 renderer = PersonalityRenderer(
-                    characters_api_url=ai_cfg.characters_api_url,
+                    prompt_composer_url=ai_cfg.prompt_composer_url,
                     character_id=ai_cfg.character_id,
                     cathy_api_url=ai_cfg.cathy_api_url,
                     fallback_system_prompt=ai_cfg.fallback_system_prompt,
                     cathy_api_key=ai_cfg.cathy_api_key,
-                    characters_api_key=ai_cfg.characters_api_key,
-                    characters_api_key_header=ai_cfg.characters_api_key_header,
                     timeout_seconds=ai_cfg.timeout_seconds,
                     connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
                     max_tokens=ai_cfg.max_tokens,
@@ -365,13 +361,11 @@ async def run_pressure(
             if ai_cfg and ai_cfg.enabled:
                 try:
                     renderer = PersonalityRenderer(
-                        characters_api_url=ai_cfg.characters_api_url,
+                        prompt_composer_url=ai_cfg.prompt_composer_url,
                         character_id=ai_cfg.character_id,
                         cathy_api_url=ai_cfg.cathy_api_url,
                         fallback_system_prompt=ai_cfg.fallback_system_prompt,
                         cathy_api_key=ai_cfg.cathy_api_key,
-                        characters_api_key=ai_cfg.characters_api_key,
-                        characters_api_key_header=ai_cfg.characters_api_key_header,
                         timeout_seconds=ai_cfg.timeout_seconds,
                         connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
                         max_tokens=ai_cfg.max_tokens,
@@ -493,13 +487,11 @@ async def run_pressure(
         if ai_cfg and ai_cfg.enabled:
             try:
                 renderer = PersonalityRenderer(
-                    characters_api_url=ai_cfg.characters_api_url,
+                    prompt_composer_url=ai_cfg.prompt_composer_url,
                     character_id=ai_cfg.character_id,
                     cathy_api_url=ai_cfg.cathy_api_url,
                     fallback_system_prompt=ai_cfg.fallback_system_prompt,
                     cathy_api_key=ai_cfg.cathy_api_key,
-                    characters_api_key=ai_cfg.characters_api_key,
-                    characters_api_key_header=ai_cfg.characters_api_key_header,
                     timeout_seconds=ai_cfg.timeout_seconds,
                     connect_timeout_seconds=ai_cfg.connect_timeout_seconds,
                     max_tokens=ai_cfg.max_tokens,
