@@ -11,21 +11,19 @@ def payload_fingerprint(payload: Dict[str, Any]) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-def should_send(state_path: str, fp: str, debug: bool, force_notify: bool) -> bool:
+def should_send(state_path: str, fp: str, print_effective_config: bool) -> bool:
     """Check if message should be sent based on dedupe state.
     
     :param state_path: Path to state file
     :type state_path: str
     :param fp: Fingerprint of current payload
     :type fp: str
-    :param debug: Debug mode (always send)
-    :type debug: bool
-    :param force_notify: Force notification (always send)
-    :type force_notify: bool
+    :param print_effective_config: Override dedupe and force send
+    :type print_effective_config: bool
     :return: True if should send
     :rtype: bool
     """
-    if debug or force_notify:
+    if print_effective_config:
         return True
     
     prev = None

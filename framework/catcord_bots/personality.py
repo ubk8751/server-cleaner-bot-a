@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, Optional
 
 import httpx
+from catcord_bots.formatting import format_retention_stats, format_pressure_stats, storage_status_label
 
 
 class PersonalityRenderer:
@@ -93,19 +94,13 @@ class PersonalityRenderer:
         s = s.strip('"').strip("'")
         return s.strip()
 
-    def _pressure_state(self, payload: dict) -> str:
+    def _get_storage_category(self, payload: dict) -> str:
+        """Get word-only storage category for AI context."""
         disk = payload.get("disk") or {}
-        actions = payload.get("actions") or {}
-        pb = disk.get("percent_before")
-        pt = disk.get("pressure_threshold")
-        dc = actions.get("deleted_count") or 0
-        if dc > 0:
-            return "active"
-        if pb is None or pt is None:
-            return "ok"
-        if pb < pt and (pt - pb) <= 5.0:
-            return "close"
-        return "ok"
+        pb = disk.get("percent_before", 0.0)
+        pt = disk.get("pressure_threshold", 85.0)
+        et = disk.get("emergency_threshold", 92.0)
+        return storage_status_label(pb, pt, et)
 
     def _validate_prefix(self, text: str) -> tuple[bool, str]:
         """Validate AI prefix is safe and contains no numbers. Returns (ok, reason)."""
@@ -142,58 +137,32 @@ class PersonalityRenderer:
 
         return True, ""
 
-    def _metrics_line(self, summary_payload: Dict[str, Any]) -> str:
-        """Build deterministic metrics line from payload."""
-        mode = (summary_payload.get("mode") or "").lower()
-        actions = summary_payload.get("actions") or {}
-        deleted = actions.get("deleted_count")
-        freed = actions.get("freed_gb")
 
-        if mode == "retention":
-            by_type = actions.get("deleted_by_type") or {}
-            imgs = by_type.get("images", 0)
-            non = by_type.get("non_images", 0)
-            return f"Retention: deleted={deleted} (images={imgs}, non_images={non}), freed_gb={freed}."
-
-        disk = summary_payload.get("disk") or {}
-        pb = disk.get("percent_before")
-        pt = disk.get("pressure_threshold")
-
-        if pb is None or pt is None or freed is None or deleted is None:
-            return "Disk usage: unknown (threshold unknown). No deletions. Freed: 0.0 GB."
-
-        if int(deleted) == 0:
-            return f"Disk usage: {pb}% (threshold {pt}%). No deletions. Freed: {freed} GB."
-        return f"Disk usage: {pb}% (threshold {pt}%). Deleted: {deleted}. Freed: {freed} GB."
 
     def _validate_output(self, summary_payload: Dict[str, Any], text: str) -> tuple[bool, str]:
         """Deprecated - kept for compatibility."""
         return True, ""
 
     def _build_user_prompt(self, summary_payload: Dict[str, Any]) -> str:
-        state = self._pressure_state(summary_payload)
-        if state == "ok":
+        """Build AI prompt for prefix generation only."""
+        actions = summary_payload.get("actions") or {}
+        deleted = actions.get("deleted_count", 0)
+        storage_cat = self._get_storage_category(summary_payload)
+        
+        if deleted == 0:
             return (
-                "You are Irina. You reviewed the server logs.\n"
+                f"You are Irina. You reviewed the server logs. Storage is {storage_cat}.\n"
                 "Write ONE short sentence (max 110 chars).\n"
-                "Meaning must match: No issues; nothing removed.\n"
-                "No digits, no timestamps, no quotes, no emojis.\n"
-                "Do not add a second sentence.\n"
-            )
-        elif state == "close":
-            return (
-                "You are Irina. You reviewed the server logs.\n"
-                "Write ONE short sentence (max 110 chars).\n"
-                "Meaning must match: Getting close to the limit; monitoring closely; no action yet.\n"
-                "No digits, no timestamps, no quotes, no emojis.\n"
+                "Meaning: You reviewed logs and concluded no action needed; nothing removed.\n"
+                "No digits, no percentages, no GB, no timestamps, no quotes, no emojis.\n"
                 "Do not add a second sentence.\n"
             )
         else:
             return (
-                "You are Irina. You reviewed the server logs.\n"
+                f"You are Irina. You reviewed the server logs. Storage was {storage_cat}.\n"
                 "Write ONE short sentence (max 110 chars).\n"
-                "Meaning must match: Cleanup was required and was performed.\n"
-                "No digits, no timestamps, no quotes, no emojis.\n"
+                "Meaning: You reviewed logs and cleanup was performed.\n"
+                "No digits, no percentages, no GB, no timestamps, no quotes, no emojis.\n"
                 "Do not add a second sentence.\n"
             )
 
@@ -320,9 +289,8 @@ class PersonalityRenderer:
                             last_reject_reason = reason
                             continue
 
-                        final = f"{prefix.strip()} {self._metrics_line(summary_payload)}".strip()
-                        print(f"PersonalityRenderer: accepted (attempt={attempt}) final={final!r}", flush=True)
-                        return final
+                        print(f"PersonalityRenderer: accepted (attempt={attempt}) prefix={prefix!r}", flush=True)
+                        return prefix.strip()
                     
                     except httpx.TimeoutException as e:
                         print(f"PersonalityRenderer: Timeout (attempt={attempt}): {e!r}", flush=True)
@@ -339,9 +307,9 @@ class PersonalityRenderer:
                         last_reject_reason = "http_error"
                         continue
 
-                print(f"PersonalityRenderer: exhausted retries -> metrics only", flush=True)
-                return self._metrics_line(summary_payload)
+                print(f"PersonalityRenderer: exhausted retries -> None", flush=True)
+                return None
 
         except Exception as e:
-            print(f"PersonalityRenderer exception -> metrics only: {e!r}", flush=True)
-            return self._metrics_line(summary_payload)
+            print(f"PersonalityRenderer exception -> None: {e!r}", flush=True)
+            return None

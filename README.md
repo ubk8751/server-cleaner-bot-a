@@ -52,22 +52,32 @@ docker-compose run --rm cleaner --config /config/config.yaml --mode pressure
 docker-compose run --rm cleaner --config /config/config.yaml --mode retention
 ```
 
+Nightly summary (with forced notification):
+```bash
+docker-compose run --rm cleaner --config /config/config.yaml --mode retention --print-effective-config
+docker-compose run --rm cleaner --config /config/config.yaml --mode pressure --print-effective-config
+```
+
 ### CLI Flags
 
 - `--mode {retention,pressure}` - Cleanup mode (required)
 - `--dry-run` - Simulate without deleting
-- `--debug` - Force send notification even if dedupe would skip
-- `--force-notify` - Force send notification even on no-action
+- `--print-effective-config` - Force send notification for nightly summaries (overrides dedupe and send_zero)
 
 ### Deduplication
 
 The bot tracks payload fingerprints in `/state/{mode}_last.fp` to prevent duplicate notifications. Messages are only sent when:
 
 - Payload changes (different deletions, disk usage, etc.)
-- `--debug` flag is used (always send)
-- `--force-notify` flag is used (always send)
+- `--print-effective-config` flag is used (always send)
 
-Use `--force-notify` for scheduled daily summaries (e.g., 01:00 pressure check) and omit it for frequent checks (e.g., 2-minute pressure monitoring).
+Use `--print-effective-config` for scheduled nightly summaries (e.g., 01:00 retention and pressure checks) and omit it for frequent checks (e.g., 2-minute pressure monitoring).
+
+## Scheduling
+
+See [SYSTEMD.md](SYSTEMD.md) for systemd service and timer configuration:
+- Nightly run at 01:00: Both retention and pressure with `--print-effective-config`
+- Frequent pressure checks: Every 2 minutes without the flag
 
 ## AI Configuration
 

@@ -10,11 +10,26 @@ from catcord_bots.matrix import MatrixSession, send_text
 from catcord_bots.invites import join_all_invites
 from catcord_bots.personality import PersonalityRenderer
 from catcord_bots.state import payload_fingerprint, should_send
+from catcord_bots.formatting import format_retention_stats, format_pressure_stats
 
 
 def get_disk_usage_ratio(path: str) -> float:
     st = os.statvfs(path)
     return 1.0 - (st.f_bavail / st.f_blocks)
+
+
+def count_media_files(media_root: str) -> int:
+    """Count total files under media_root.
+    
+    :param media_root: Root media directory
+    :type media_root: str
+    :return: Total file count
+    :rtype: int
+    """
+    count = 0
+    for root, _, files in os.walk(media_root):
+        count += len(files)
+    return count
 
 
 def init_db(db_path: str) -> sqlite3.Connection:
@@ -154,12 +169,12 @@ async def run_retention(
     send_zero: bool,
     dry_run: bool,
     ai_cfg: Optional[PersonalityConfig] = None,
-    debug: bool = False,
-    force_notify: bool = False,
+    print_effective_config: bool = False,
 ) -> None:
     start_time = datetime.now()
     cutoff_img = int((datetime.now() - timedelta(days=policy.image_days)).timestamp() * 1000)
     cutoff_non = int((datetime.now() - timedelta(days=policy.non_image_days)).timestamp() * 1000)
+    
     cur = conn.execute("""
         SELECT event_id, room_id, mxc_uri, mimetype, size, timestamp
         FROM uploads
@@ -167,11 +182,17 @@ async def run_retention(
            OR (mimetype NOT LIKE 'image/%' AND timestamp < ?)
         ORDER BY (mimetype LIKE 'image/%') ASC, timestamp ASC, size DESC
     """, (cutoff_img, cutoff_non))
+    candidates = cur.fetchall()
+    candidates_count = len(candidates)
+    
+    used = get_disk_usage_ratio(media_root)
+    total_files = count_media_files(media_root)
+    
     deleted = 0
     freed = 0
     deleted_images = 0
     deleted_non_images = 0
-    for event_id, room_id, mxc_uri, mimetype, size, ts in cur.fetchall():
+    for event_id, room_id, mxc_uri, mimetype, size, ts in candidates:
         paths = find_media_files(media_root, mxc_uri)
         if dry_run:
             print(f"[DRY-RUN] Would redact+delete {event_id} files={len(paths)}")
@@ -197,18 +218,29 @@ async def run_retention(
         except Exception as e:
             print(f"retention failed {event_id}: {e}")
     
-    if notifications_room and (deleted > 0 or send_zero or dry_run):
+    should_notify = (deleted > 0) or send_zero or dry_run or print_effective_config
+    if notifications_room and should_notify:
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
+        disk_percent = used * 100
         
         summary_payload = {
             "run_id": f"{start_time.isoformat()}Z-retention",
             "mode": "retention",
             "server": "catcord",
+            "disk": {
+                "mount": media_root,
+                "percent_before": round(disk_percent, 1),
+                "percent_after": round(disk_percent, 1),
+                "pressure_threshold": policy.pressure * 100,
+                "emergency_threshold": policy.emergency * 100,
+            },
             "policy": {
                 "retention_days_images": policy.image_days,
                 "retention_days_non_images": policy.non_image_days,
             },
+            "candidates_count": candidates_count,
+            "total_files_count": total_files,
             "actions": {
                 "deleted_count": deleted,
                 "freed_gb": round(freed / 1024 / 1024 / 1024, 2),
@@ -226,19 +258,14 @@ async def run_retention(
         
         state_path = "/state/retention_last.fp"
         fp = payload_fingerprint(summary_payload)
-        if not should_send(state_path, fp, debug, force_notify):
-            print(f"Dedupe: skipping send (fp={fp[:12]}...)")
+        if not should_send(state_path, fp, print_effective_config):
+            print(f"Deduped: fingerprint unchanged (fp={fp[:12]}...)")
             return
         
         prefix = "[DRY-RUN] " if dry_run else ""
-        freed_gb = freed / 1024 / 1024 / 1024
-        fallback = (
-            f"{prefix}🧹 Retention: deleted={deleted} "
-            f"(images={deleted_images}, non_images={deleted_non_images}), "
-            f"freed_gb={freed_gb:.2f}"
-        )
+        stats = format_retention_stats(summary_payload)
         
-        message = fallback
+        ai_prefix = None
         if ai_cfg and ai_cfg.enabled:
             try:
                 renderer = PersonalityRenderer(
@@ -258,20 +285,26 @@ async def run_retention(
                     cathy_api_mode=ai_cfg.cathy_api_mode,
                     cathy_api_model=ai_cfg.cathy_api_model,
                 )
-                rendered = await renderer.render(summary_payload)
-                if rendered:
-                    message = prefix + rendered
+                ai_prefix = await renderer.render(summary_payload)
+                if ai_prefix:
                     print("AI render: used")
                 else:
-                    print("AI render: empty -> fallback")
+                    print("AI render: empty -> stats only")
             except Exception as e:
-                print(f"AI render failed -> fallback: {e}")
+                print(f"AI render failed -> stats only: {e}")
+        
+        if ai_prefix:
+            message = f"{prefix}{ai_prefix}\n{stats}"
+        else:
+            message = f"{prefix}{stats}"
         
         try:
             await send_text(session, notifications_room, message)
             print(f"Sent message to {notifications_room}")
         except Exception as e:
             print(f"Failed to send message: {e}")
+    elif notifications_room and not should_notify:
+        print(f"Not sending: send_zero disabled and no action (deleted={deleted})")
 
 
 async def run_pressure(
@@ -283,14 +316,14 @@ async def run_pressure(
     send_zero: bool,
     dry_run: bool,
     ai_cfg: Optional[PersonalityConfig] = None,
-    debug: bool = False,
-    force_notify: bool = False,
+    print_effective_config: bool = False,
 ) -> None:
     start_time = datetime.now()
     used = get_disk_usage_ratio(media_root)
     if used < policy.pressure:
         print(f"disk usage {used:.3f} < {policy.pressure:.3f}, no action")
-        if notifications_room and (send_zero or dry_run):
+        should_notify = send_zero or dry_run or print_effective_config
+        if notifications_room and should_notify:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             disk_before = used * 100
@@ -320,16 +353,14 @@ async def run_pressure(
             
             state_path = "/state/pressure_last.fp"
             fp = payload_fingerprint(summary_payload)
-            if not should_send(state_path, fp, debug, force_notify):
-                print(f"Dedupe: skipping send (fp={fp[:12]}...)")
+            if not should_send(state_path, fp, print_effective_config):
+                print(f"Deduped: fingerprint unchanged (fp={fp[:12]}...)")
                 return
             
             prefix = "[DRY-RUN] " if dry_run else ""
-            fallback = (
-                f"{prefix} Pressure cleanup: disk={disk_before:.1f}% "
-                f"< threshold={policy.pressure*100:.1f}%, no action"
-            )
-            message = fallback
+            stats = format_pressure_stats(summary_payload)
+            
+            ai_prefix = None
             if ai_cfg and ai_cfg.enabled:
                 try:
                     renderer = PersonalityRenderer(
@@ -349,20 +380,28 @@ async def run_pressure(
                         cathy_api_mode=ai_cfg.cathy_api_mode,
                         cathy_api_model=ai_cfg.cathy_api_model,
                     )
-                    rendered = await renderer.render(summary_payload)
-                    if rendered:
-                        message = prefix + rendered
+                    ai_prefix = await renderer.render(summary_payload)
+                    if ai_prefix:
                         print("AI render: used")
                     else:
-                        print("AI render: empty -> fallback")
+                        print("AI render: empty -> stats only")
                 except Exception as e:
-                    print(f"AI render failed -> fallback: {e}")
+                    print(f"AI render failed -> stats only: {e}")
+            
+            if ai_prefix:
+                message = f"{prefix}{ai_prefix}\n{stats}"
+            else:
+                message = f"{prefix}{stats}"
+            
             try:
                 await send_text(session, notifications_room, message)
                 print(f"Sent message to {notifications_room}")
             except Exception as e:
                 print(f"Failed to send message: {e}")
+        elif notifications_room and not should_notify:
+            print(f"Not sending: send_zero disabled and no action")
         return
+    
     cur = conn.execute("""
         SELECT event_id, room_id, mxc_uri, mimetype, size, timestamp
         FROM uploads
@@ -403,7 +442,8 @@ async def run_pressure(
         except Exception as e:
             print(f"pressure failed {event_id}: {e}")
     
-    if notifications_room and (deleted > 0 or send_zero or dry_run):
+    should_notify = (deleted > 0) or send_zero or dry_run or print_effective_config
+    if notifications_room and should_notify:
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         disk_after = get_disk_usage_ratio(media_root) * 100
@@ -439,20 +479,14 @@ async def run_pressure(
         
         state_path = "/state/pressure_last.fp"
         fp = payload_fingerprint(summary_payload)
-        if not should_send(state_path, fp, debug, force_notify):
-            print(f"Dedupe: skipping send (fp={fp[:12]}...)")
+        if not should_send(state_path, fp, print_effective_config):
+            print(f"Deduped: fingerprint unchanged (fp={fp[:12]}...)")
             return
         
         prefix = "[DRY-RUN] " if dry_run else ""
-        freed_gb = freed / 1024 / 1024 / 1024
-        fallback = (
-            f"{prefix} Pressure cleanup: disk={disk_before:.1f}%→{disk_after:.1f}% "
-            f"(threshold={policy.pressure*100:.1f}%, emergency={policy.emergency*100:.1f}%), "
-            f"deleted={deleted} (images={deleted_images}, non_images={deleted_non_images}), "
-            f"freed_gb={freed_gb:.2f}"
-        )
+        stats = format_pressure_stats(summary_payload)
         
-        message = fallback
+        ai_prefix = None
         if ai_cfg and ai_cfg.enabled:
             try:
                 renderer = PersonalityRenderer(
@@ -472,17 +506,23 @@ async def run_pressure(
                     cathy_api_mode=ai_cfg.cathy_api_mode,
                     cathy_api_model=ai_cfg.cathy_api_model,
                 )
-                rendered = await renderer.render(summary_payload)
-                if rendered:
-                    message = prefix + rendered
+                ai_prefix = await renderer.render(summary_payload)
+                if ai_prefix:
                     print("AI render: used")
                 else:
-                    print("AI render: empty -> fallback")
+                    print("AI render: empty -> stats only")
             except Exception as e:
-                print(f"AI render failed -> fallback: {e}")
+                print(f"AI render failed -> stats only: {e}")
+        
+        if ai_prefix:
+            message = f"{prefix}{ai_prefix}\n{stats}"
+        else:
+            message = f"{prefix}{stats}"
         
         try:
             await send_text(session, notifications_room, message)
             print(f"Sent message to {notifications_room}")
         except Exception as e:
             print(f"Failed to send message: {e}")
+    elif notifications_room and not should_notify:
+        print(f"Not sending: send_zero disabled and no action (deleted={deleted})")
