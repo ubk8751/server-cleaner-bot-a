@@ -2,12 +2,42 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
 
 class PersonalityRenderer:
+    """Renders AI-generated status prefixes using prompt-composer and LLM.
+    
+    :param prompt_composer_url: URL of prompt-composer service
+    :type prompt_composer_url: str
+    :param character_id: Character ID for personality
+    :type character_id: str
+    :param cathy_api_url: URL of LLM API
+    :type cathy_api_url: str
+    :param fallback_system_prompt: Fallback system prompt if composer fails
+    :type fallback_system_prompt: str
+    :param cathy_api_key: Optional API key for LLM
+    :type cathy_api_key: Optional[str]
+    :param timeout_seconds: Request timeout in seconds
+    :type timeout_seconds: float
+    :param connect_timeout_seconds: Connection timeout in seconds
+    :type connect_timeout_seconds: float
+    :param max_tokens: Maximum tokens for LLM response
+    :type max_tokens: int
+    :param temperature: LLM temperature parameter
+    :type temperature: float
+    :param top_p: LLM top_p parameter
+    :type top_p: float
+    :param min_seconds_between_calls: Minimum seconds between API calls
+    :type min_seconds_between_calls: int
+    :param cathy_api_mode: API mode (ollama or openai)
+    :type cathy_api_mode: str
+    :param cathy_api_model: Model name
+    :type cathy_api_model: str
+    """
+    
     def __init__(
         self,
         prompt_composer_url: str,
@@ -23,7 +53,7 @@ class PersonalityRenderer:
         min_seconds_between_calls: int = 0,
         cathy_api_mode: str = "ollama",
         cathy_api_model: str = "gemma2:2b",
-    ):
+    ) -> None:
         self.prompt_composer_url = prompt_composer_url
         self.character_id = character_id
         self.cathy_api_url = cathy_api_url
@@ -40,14 +70,29 @@ class PersonalityRenderer:
         self._last_call_ts: float = 0.0
 
     def _rate_limited(self) -> bool:
+        """Check if rate limit prevents API call.
+        
+        :return: True if rate limited
+        :rtype: bool
+        """
         now = time.time()
         if (now - self._last_call_ts) < self.min_seconds_between_calls:
             return True
         self._last_call_ts = now
         return False
 
-    async def _compose_prompt(self, client: httpx.AsyncClient, summary_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Call prompt-composer to build system prompt and messages."""
+    async def _compose_prompt(
+        self, client: httpx.AsyncClient, summary_payload: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Call prompt-composer to build system prompt and messages.
+        
+        :param client: HTTP client
+        :type client: httpx.AsyncClient
+        :param summary_payload: Summary data for prompt composition
+        :type summary_payload: Dict[str, Any]
+        :return: Prompt bundle or None on failure
+        :rtype: Optional[Dict[str, Any]]
+        """
         mode = summary_payload.get("mode", "unknown")
         task = "pressure_status" if mode == "pressure" else "retention_report"
         
@@ -77,7 +122,13 @@ class PersonalityRenderer:
             return None
 
     def _normalize_prefix(self, raw: str) -> str:
-        """Normalize raw prefix."""
+        """Normalize raw prefix by removing wrapping quotes.
+        
+        :param raw: Raw prefix text
+        :type raw: str
+        :return: Normalized prefix
+        :rtype: str
+        """
         text = raw.strip()
         if text.startswith('"') and text.endswith('"'):
             text = text[1:-1]
@@ -85,8 +136,18 @@ class PersonalityRenderer:
             text = text[1:-1]
         return text.strip()
 
-    async def _call_llm(self, client: httpx.AsyncClient, messages: list) -> Optional[str]:
-        """Call LLM with messages and return prefix text."""
+    async def _call_llm(
+        self, client: httpx.AsyncClient, messages: List[Dict[str, str]]
+    ) -> Optional[str]:
+        """Call LLM with messages and return prefix text.
+        
+        :param client: HTTP client
+        :type client: httpx.AsyncClient
+        :param messages: Chat messages
+        :type messages: List[Dict[str, str]]
+        :return: Generated prefix or None on failure
+        :rtype: Optional[str]
+        """
         headers = {"Content-Type": "application/json"}
         if self.cathy_api_key:
             headers["Authorization"] = f"Bearer {self.cathy_api_key}"
@@ -148,7 +209,13 @@ class PersonalityRenderer:
             return None
 
     def _get_fallback_prefix(self, summary_payload: Dict[str, Any]) -> str:
-        """Get deterministic fallback prefix based on payload."""
+        """Get deterministic fallback prefix based on payload.
+        
+        :param summary_payload: Summary data
+        :type summary_payload: Dict[str, Any]
+        :return: Fallback prefix
+        :rtype: str
+        """
         actions = summary_payload.get("actions", {})
         deleted_count = actions.get("deleted_count", 0)
         storage_status = summary_payload.get("storage_status", "unknown")
@@ -159,8 +226,14 @@ class PersonalityRenderer:
             return "Logs clear, Master."
         return "Cleanup executed, Master."
 
-    def _validate_prefix(self, text: str) -> tuple[bool, str]:
-        """Validate AI prefix is safe and contains no numbers."""
+    def _validate_prefix(self, text: str) -> Tuple[bool, str]:
+        """Validate AI prefix against safety rules.
+        
+        :param text: Prefix text to validate
+        :type text: str
+        :return: Tuple of (is_valid, rejection_reason)
+        :rtype: Tuple[bool, str]
+        """
         t = text.strip()
         tlow = t.lower()
 
@@ -199,7 +272,13 @@ class PersonalityRenderer:
         return True, ""
 
     async def render(self, summary_payload: Dict[str, Any]) -> Optional[str]:
-        """Render AI prefix using prompt-composer and LLM."""
+        """Render AI prefix using prompt-composer and LLM.
+        
+        :param summary_payload: Summary data for rendering
+        :type summary_payload: Dict[str, Any]
+        :return: Generated prefix or None if rate limited
+        :rtype: Optional[str]
+        """
         if self._rate_limited():
             return None
 

@@ -1,118 +1,186 @@
-# Catcord Bots Framework
+# Catcord Bots
 
-Shared framework for Matrix bots with individual bot services.
+Matrix bot framework with automated media cleanup service.
 
-## Structure
+## Architecture
 
 ```
-./
-  docker-compose.yml         # Bot orchestration
-  framework/                 # Shared package
-    catcord_bots/           # Python package (matrix, config, personality, state)
-    Dockerfile              # Base image
-  cleaner/                  # Cleaner bot
-    main.py                 # Entry point
-    cleaner.py              # Core logic
-    Dockerfile
-    config.yaml
-  tests/                    # Test suite
+bots/
+├── framework/          # Shared Python package
+│   └── catcord_bots/  # Matrix client, config, personality, state
+├── cleaner/           # Media cleanup bot
+│   ├── main.py        # Entry point
+│   ├── cleaner.py     # Cleanup logic
+│   └── config.yaml    # Configuration
+└── tests/             # Test suite
 ```
 
 ## Features
 
-- **Framework**: Shared Matrix client, config parsing, AI summary rendering, deduplication
-- **Cleaner Bot**: Automated media cleanup with retention and pressure modes
-- **Personality**: Optional summaries with personality via characters API
-- **Deduplication**: Prevents duplicate notifications based on payload fingerprints
+- **Matrix Integration**: Async Matrix client with auto-join and messaging
+- **Media Cleanup**: Retention and pressure-based cleanup modes
+- **AI Personality**: Optional AI-generated status prefixes via prompt-composer
+- **Deduplication**: Prevents duplicate notifications using payload fingerprints
+- **State Management**: Tracks last notification to avoid spam
 
 ## Setup
 
-Run `./setup.sh` and choose:
-1. Docker (production)
-2. Local Python (development)
-
-## Build
+### Docker (Production)
 
 ```bash
+./setup.sh  # Choose option 1
 docker build -t catcord-bots-framework:latest -f framework/Dockerfile framework
 docker-compose build cleaner
 ```
 
-## Run Cleaner Bot
+### Local (Development)
 
-Dry-run:
 ```bash
-docker-compose run --rm cleaner --config /config/config.yaml --mode pressure --dry-run
-docker-compose run --rm cleaner --config /config/config.yaml --mode retention --dry-run
+./setup.sh  # Choose option 2
+source venv/bin/activate
 ```
 
-Production:
-```bash
-docker-compose run --rm cleaner --config /config/config.yaml --mode pressure
-docker-compose run --rm cleaner --config /config/config.yaml --mode retention
-```
+## Configuration
 
-Nightly summary (with forced notification):
-```bash
-docker-compose run --rm cleaner --config /config/config.yaml --mode retention --print-effective-config
-docker-compose run --rm cleaner --config /config/config.yaml --mode pressure --print-effective-config
-```
+Copy `config.yaml.template` to `config.yaml` and configure:
 
-### CLI Flags
-
-- `--mode {retention,pressure}` - Cleanup mode (required)
-- `--dry-run` - Simulate without deleting
-- `--print-effective-config` - Force send notification for nightly summaries (overrides dedupe and send_zero, prints config summary)
-
-### Deduplication
-
-The bot tracks payload fingerprints in `/state/{mode}_last.fp` to prevent duplicate notifications. Messages are only sent when:
-
-- Payload changes (different deletions, disk usage, etc.)
-- `--print-effective-config` flag is used (always send)
-
-Use `--print-effective-config` for scheduled nightly summaries (e.g., 01:00 retention and pressure checks) and omit it for frequent checks (e.g., 2-minute pressure monitoring).
-
-## Scheduling
-
-See [SYSTEMD.md](SYSTEMD.md) for systemd service and timer configuration:
-- Nightly run at 01:00: Both retention and pressure with `--print-effective-config`
-- Frequent pressure checks: Every 2 minutes without the flag
-
-## AI Configuration
-
-The personality renderer uses prompt-composer to build system prompts:
-
-- `prompt_composer_url` - URL of cathyAI-infra prompt-composer service
-- `character_id` - Character to use (e.g., `irina`)
-- `cathy_api_mode: "ollama"` - Uses Ollama `/api/chat` endpoint
-- `cathy_api_mode: "openai"` - Uses OpenAI-compatible `/v1/chat/completions` endpoint
-
-Set `cathy_api_model` to your model name (e.g., `llama3`, `gemma2:2b`, `cathy`).
-
-### Prompt Composer
-
-The bot calls prompt-composer `/v1/prompt/compose` with:
-- `task`: "pressure_status" or "retention_report"
-- `platform`: "matrix"
-- `character_id`: from config
-- `task_inputs`: structured payload with disk/actions/timing data
-
-Prompt-composer fetches character data and builds appropriate prompts.
-
-Example config:
 ```yaml
+matrix:
+  homeserver_url: "https://matrix.example.com"
+  user_id: "@bot:example.com"
+  access_token: "your_token"
+  notifications_room: "!room:example.com"
+
+cleaner:
+  media_root: "/path/to/media"
+  db_path: "/path/to/uploads.db"
+  policy:
+    image_days: 90
+    non_image_days: 30
+    pressure: 0.85
+    emergency: 0.92
+
 add_personality:
   enabled: true
-  prompt_composer_url: "http://192.168.1.59:8110"
+  prompt_composer_url: "http://localhost:8110"
   character_id: "irina"
-  cathy_api_url: "http://192.168.1.57:8100"
+  cathy_api_url: "http://localhost:8100"
   cathy_api_mode: "ollama"
   cathy_api_model: "gemma2:2b"
 ```
 
-## Tests
+## Usage
+
+### Cleaner Bot
+
+**Retention Mode**: Delete media older than configured days
+
+```bash
+docker-compose run --rm cleaner --config /config/config.yaml --mode retention --dry-run
+docker-compose run --rm cleaner --config /config/config.yaml --mode retention
+```
+
+**Pressure Mode**: Delete media when disk usage exceeds threshold
+
+```bash
+docker-compose run --rm cleaner --config /config/config.yaml --mode pressure --dry-run
+docker-compose run --rm cleaner --config /config/config.yaml --mode pressure
+```
+
+**Flags**:
+- `--mode {retention,pressure}`: Cleanup mode (required)
+- `--dry-run`: Simulate without deleting
+- `--print-effective-config`: Force send notification (for scheduled runs)
+
+### Scheduling
+
+Use systemd timers or cron:
+
+```bash
+# Nightly full check at 01:00
+0 1 * * * docker-compose run --rm cleaner --config /config/config.yaml --mode retention --print-effective-config
+0 1 * * * docker-compose run --rm cleaner --config /config/config.yaml --mode pressure --print-effective-config
+
+# Frequent pressure monitoring every 2 minutes
+*/2 * * * * docker-compose run --rm cleaner --config /config/config.yaml --mode pressure
+```
+
+## AI Personality
+
+The bot can generate contextual status prefixes using:
+1. **prompt-composer**: Builds character-specific prompts
+2. **LLM API**: Generates natural language prefixes (Ollama or OpenAI-compatible)
+
+### Validation Rules
+
+AI prefixes are validated to ensure:
+- 3-140 characters, single sentence
+- No digits, quotes, newlines
+- No meta-descriptions (bot, Matrix, room, etc.)
+- No temporal references (today, yesterday, uptime)
+- No deletion claims (deleted, removed, purged)
+
+### Fallback Prefixes
+
+If AI fails or is disabled, deterministic fallbacks are used:
+- No deletions + healthy storage: "Logs clear, Master."
+- No deletions + tight storage: "Storage getting tight, Master."
+- Deletions occurred: "Cleanup executed, Master."
+
+## Deduplication
+
+Notifications are deduplicated using payload fingerprints stored in `/state/{mode}_last.fp`. Messages are only sent when:
+- Payload changes (different deletions, disk usage, etc.)
+- `--print-effective-config` flag is used (always send)
+
+This prevents spam from frequent checks while ensuring important changes are reported.
+
+## Development
+
+### Run Tests
 
 ```bash
 pytest tests/ -v
 ```
+
+### Code Standards
+
+- PEP 8 compliance (88 char line length)
+- reST docstrings with type annotations
+- Type hints for all function signatures
+
+### Commit Format
+
+```
+[type]: Title
+
+Description:
+  - Change 1
+  - Change 2
+
+Additional info:
+  - Info 1
+```
+
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+
+## Framework Modules
+
+### catcord_bots.matrix
+Matrix client wrapper with async operations, auto-join, and messaging.
+
+### catcord_bots.config
+YAML configuration parsing and validation.
+
+### catcord_bots.personality
+AI prefix generation with prompt-composer integration, validation, and fallbacks.
+
+### catcord_bots.state
+Payload fingerprinting and deduplication logic.
+
+### catcord_bots.formatting
+Message formatting for retention and pressure reports.
+
+## License
+
+See repository license file.

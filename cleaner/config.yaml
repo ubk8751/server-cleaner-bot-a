@@ -18,7 +18,7 @@ notifications:
   log_room_id: "!7v8paEHyTUpr285UsmGo3mzS9Cjw4wQ-60e9kmKCSrI"
   send_deletion_summary: true
   send_nightly_status: true
-  send_zero_deletion_summaries: true
+  send_zero_deletion_summaries: false
 
 rooms_allowlist: []
 

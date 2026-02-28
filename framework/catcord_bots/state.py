@@ -6,7 +6,13 @@ from typing import Dict, Any
 
 
 def _normalize_payload_for_fingerprint(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract stable fields for fingerprinting, excluding volatile timing/IDs."""
+    """Extract stable fields for fingerprinting, excluding volatile timing/IDs.
+    
+    :param payload: Full payload dictionary
+    :type payload: Dict[str, Any]
+    :return: Normalized payload with stable fields only
+    :rtype: Dict[str, Any]
+    """
     mode = payload.get("mode", "unknown")
     normalized = {
         "mode": mode,
@@ -38,7 +44,13 @@ def _normalize_payload_for_fingerprint(payload: Dict[str, Any]) -> Dict[str, Any
 
 
 def payload_fingerprint(payload: Dict[str, Any]) -> str:
-    """Generate stable hash from payload, excluding volatile fields."""
+    """Generate stable hash from payload, excluding volatile fields.
+    
+    :param payload: Payload dictionary
+    :type payload: Dict[str, Any]
+    :return: SHA256 hexdigest of normalized payload
+    :rtype: str
+    """
     normalized = _normalize_payload_for_fingerprint(payload)
     s = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
