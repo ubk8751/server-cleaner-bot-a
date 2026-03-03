@@ -68,6 +68,8 @@ class PersonalityRenderer:
         self.cathy_api_mode = cathy_api_mode
         self.cathy_api_model = cathy_api_model
         self._last_call_ts: float = 0.0
+        self._cached_prompt: Optional[str] = None
+        self._cached_etag: Optional[str] = None
 
     def _rate_limited(self) -> bool:
         """Check if rate limit prevents API call.
