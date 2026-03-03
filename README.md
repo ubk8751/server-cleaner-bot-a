@@ -254,7 +254,21 @@ Memory/RAG service for event storage and retrieval.
 
 ### Service Architecture
 
-Services are internal-only (not exposed outside docker network) and do not require authentication. Security is provided by docker network isolation.
+Services are internal-only (not exposed outside docker network).
+
+**Room Allowlist (Optional):**
+
+Restrict which Matrix rooms can use the online service by setting `ONLINE_ALLOWLIST_ROOMS` in `.env`:
+
+```bash
+# Copy template
+cp .env.template .env
+
+# Edit .env and set allowlist (comma-separated room IDs)
+ONLINE_ALLOWLIST_ROOMS="!room1:server,!room2:server"
+```
+
+Leave empty to allow all rooms. The service will return 403 for non-allowlisted rooms.
 
 ## License
 

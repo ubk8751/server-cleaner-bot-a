@@ -8,6 +8,8 @@ services:
     image: catcord/online:latest
     container_name: online_service
     restart: unless-stopped
+    environment:
+      - ONLINE_ALLOWLIST_ROOMS=${ONLINE_ALLOWLIST_ROOMS:-}
     volumes:
       - /var/lib/catcord/online:/state:rw
     networks:

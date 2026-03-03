@@ -19,6 +19,8 @@ services:
 fetch:
   lookback_hours: 24
   max_items: 10
+  timeout_s: 10.0
+  user_agent: "catcord-newsbot/1.0"
   feeds:
     world:
       - "https://feeds.bbci.co.uk/news/world/rss.xml"

@@ -14,6 +14,7 @@ from pathlib import Path
 app = FastAPI(title="catcord-online", version="1.0.0")
 
 DB_PATH = Path("/state/cache.sqlite3")
+ALLOWLIST_ROOMS = set()
 
 
 class FetchRequest(BaseModel):
@@ -61,8 +62,15 @@ async def startup():
     :return: None
     :rtype: None
     """
+    global ALLOWLIST_ROOMS
+    import os
+    
+    allowlist_str = os.getenv("ONLINE_ALLOWLIST_ROOMS", "")
+    if allowlist_str:
+        ALLOWLIST_ROOMS = set(r.strip() for r in allowlist_str.split(",") if r.strip())
+    
     init_db()
-    print("Online service started")
+    print(f"Online service started (allowlist={len(ALLOWLIST_ROOMS)} rooms)")
 
 
 @app.get("/health")
@@ -83,7 +91,13 @@ async def fetch_rss(req: FetchRequest):
     :type req: FetchRequest
     :return: Fetch response
     :rtype: FetchResponse
+    :raises HTTPException: If room not in allowlist
     """
+    # Check allowlist if configured
+    if ALLOWLIST_ROOMS:
+        room_id = req.caller.get("room_id")
+        if room_id and room_id not in ALLOWLIST_ROOMS:
+            raise HTTPException(status_code=403, detail="Room not in allowlist")
     
     cutoff = datetime.now(timezone.utc) - timedelta(hours=req.lookback_hours)
     items: List[Dict[str, Any]] = []

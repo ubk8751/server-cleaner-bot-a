@@ -18,11 +18,17 @@ class FetchConfig:
     :type lookback_hours: int
     :param max_items: Maximum items to fetch
     :type max_items: int
+    :param timeout_s: Request timeout in seconds
+    :type timeout_s: float
+    :param user_agent: User agent string
+    :type user_agent: str
     :param feeds: Feed URLs by section
     :type feeds: Dict[str, list]
     """
     lookback_hours: int = 24
     max_items: int = 10
+    timeout_s: float = 10.0
+    user_agent: str = "catcord-newsbot/1.0"
     feeds: Dict[str, list] = None
     
     def __post_init__(self):
@@ -129,6 +135,8 @@ async def run_digest(
                 "feeds": feed_urls,
                 "lookback_hours": fetch_cfg.lookback_hours,
                 "max_items": fetch_cfg.max_items,
+                "timeout_s": fetch_cfg.timeout_s,
+                "user_agent": fetch_cfg.user_agent,
                 "caller": {
                     "bot": "news",
                     "room_id": notifications_room,

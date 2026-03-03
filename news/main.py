@@ -35,6 +35,8 @@ async def main_async(args):
         fetch_cfg = FetchConfig(
             lookback_hours=int(fetch_raw.get("lookback_hours", 24)),
             max_items=int(fetch_raw.get("max_items", 10)),
+            timeout_s=float(fetch_raw.get("timeout_s", 10.0)),
+            user_agent=str(fetch_raw.get("user_agent", "catcord-newsbot/1.0")),
             feeds=fetch_raw.get("feeds", {}),
         )
         
