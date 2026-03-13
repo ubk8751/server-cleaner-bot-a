@@ -88,6 +88,21 @@ add_personality:
 
 ### Cleaner Bot
 
+**Event-Driven Mode** (Recommended): Runs continuously, monitors media uploads, triggers cleanup only when disk pressure detected
+
+```bash
+# Start event-driven cleaner (runs in background)
+docker-compose up -d cleaner-event
+
+# View logs
+docker-compose logs -f cleaner-event
+
+# Stop
+docker-compose stop cleaner-event
+```
+
+**Scheduled Mode**: Run on-demand via cron/systemd for retention and pressure checks
+
 **Retention Mode**: Delete media older than configured days
 
 ```bash
@@ -109,7 +124,9 @@ docker-compose run --rm cleaner --config /config/config.yaml --mode pressure
 
 ### Scheduling
 
-Use systemd timers or cron:
+**Event-Driven (Recommended)**: Use `cleaner-event` service for zero idle CPU usage. Cleanup triggers only on media uploads when disk pressure detected.
+
+**Scheduled Mode**: Use systemd timers or cron for periodic checks:
 
 ```bash
 # Nightly full check at 01:00

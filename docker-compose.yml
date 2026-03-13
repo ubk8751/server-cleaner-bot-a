@@ -55,6 +55,21 @@ services:
     networks:
       - internal
 
+  cleaner-event:
+    build:
+      context: ./cleaner
+      dockerfile: Dockerfile
+    image: catcord/cleaner:latest
+    container_name: cleaner_event
+    restart: unless-stopped
+    command: ["python", "-u", "event_main.py"]
+    volumes:
+      - ./cleaner/config.yaml:/config/config.yaml:ro
+      - /var/lib/catcord/cleaner:/state:rw
+      - /srv/media:/srv/media:rw
+    networks:
+      - internal
+
   news:
     build:
       context: ./news

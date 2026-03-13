@@ -2,6 +2,7 @@ import pytest
 import tempfile
 import sqlite3
 from pathlib import Path
+import cleaner.event_main as event_main
 from cleaner.cleaner import (
     parse_mxc, find_media_files, get_disk_usage_ratio, 
     Policy, PersonalityConfig, init_db, extract_mxc_and_info
@@ -89,3 +90,8 @@ class TestCleanerBot:
         assert url == 'mxc://test.com/encrypted123'
         assert mimetype == 'video/mp4'
         assert size == 2048
+
+    def test_event_driven_module_exists(self):
+        """Verify event_main.py module exists."""
+        assert hasattr(event_main, 'main')
+        assert hasattr(event_main, 'on_message')
